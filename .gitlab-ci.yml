@@ -1,0 +1,178 @@
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+
+stages:
+  - validate
+  - deploy_dev
+  - deploy_prod
+
+variables:
+  AWS_REGION: "eu-west-1"
+  TF_STATE_BUCKET: ""
+  TOFU_VERSION: "1.10.6"
+  DOCKER_HOST: "tcp://docker:2376"
+  DOCKER_TLS_CERTDIR: "/certs"
+  DOCKER_TLS_VERIFY: "1"
+  DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
+
+validate_infrastructure:
+  stage: validate
+  image: alpine:3.21
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+  script:
+    - apk add --no-cache curl unzip
+    - curl -fsSLo /tmp/tofu.zip "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip"
+    - unzip -o /tmp/tofu.zip -d /usr/local/bin
+    - tofu fmt -recursive infra
+    - tofu -chdir=infra/env/dev init -backend=false
+    - tofu -chdir=infra/env/dev validate
+    - tofu -chdir=infra/env/prod init -backend=false
+    - tofu -chdir=infra/env/prod validate
+
+.deploy_environment:
+  image: docker:27.5.1
+  services:
+    - name: docker:27.5.1-dind
+      alias: docker
+  id_tokens:
+    AWS_ID_TOKEN:
+      aud: sts.amazonaws.com
+  before_script:
+    - apk add --no-cache aws-cli jq curl unzip bash nodejs npm python3
+    - curl -fsSLo /tmp/tofu.zip "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip"
+    - unzip -o /tmp/tofu.zip -d /usr/local/bin
+    - printf '%s' "$AWS_ID_TOKEN" > /tmp/aws-web-identity-token
+    - chmod 600 /tmp/aws-web-identity-token
+    - export AWS_WEB_IDENTITY_TOKEN_FILE=/tmp/aws-web-identity-token
+    - export AWS_ROLE_ARN="$CI_AWS_ROLE_ARN"
+    - export AWS_ROLE_SESSION_NAME="gitlab-${CI_PROJECT_ID}-${CI_PIPELINE_IID}"
+    - export AWS_DEFAULT_REGION="$AWS_REGION"
+    - aws sts get-caller-identity
+  script:
+    - |
+      set -eu
+      : "${TF_STATE_BUCKET:?Set TF_STATE_BUCKET in GitLab CI/CD variables}"
+      : "${AWS_ACCOUNT_ID:?Set AWS_ACCOUNT_ID in GitLab CI/CD variables}"
+      : "${CI_AWS_ROLE_ARN:?Set CI_AWS_ROLE_ARN for this environment}"
+      : "${GITLAB_OIDC_PROVIDER_ARN:?Set GITLAB_OIDC_PROVIDER_ARN}"
+      : "${GITLAB_OIDC_SUBJECT:?Set GITLAB_OIDC_SUBJECT}"
+      export AWS_ROLE_ARN="$CI_AWS_ROLE_ARN"
+      export TF_DIR="infra/env/${TARGET_ENV}"
+      export TF_VAR_gitlab_oidc_provider_arn="$GITLAB_OIDC_PROVIDER_ARN"
+      export TF_VAR_gitlab_subject="$GITLAB_OIDC_SUBJECT"
+      export TF_VAR_certificate_arn="${ENV_ALB_CERTIFICATE_ARN:-}"
+      export TF_VAR_api_origin_domain_name="${ENV_API_ORIGIN_DOMAIN_NAME:-}"
+      export TF_VAR_route53_zone_id="${ENV_ROUTE53_ZONE_ID:-}"
+      IMAGE_TAG="${CI_COMMIT_SHORT_SHA}-${CI_PIPELINE_IID}"
+
+      tofu -chdir="$TF_DIR" init \
+        -backend-config="bucket=${TF_STATE_BUCKET}" \
+        -backend-config="key=thinksmart-lone2stateai/${TARGET_ENV}/terraform.tfstate" \
+        -backend-config="region=${AWS_REGION}" \
+        -backend-config="encrypt=true" \
+        -backend-config="use_lockfile=true"
+
+      # First create AWS resources and ECR repositories with ECS desired count zero.
+      tofu -chdir="$TF_DIR" apply -auto-approve \
+        -var="api_image_tag=bootstrap" \
+        -var="api_desired_count=0" \
+        -var="worker_desired_count=0" \
+        -var="gitlab_oidc_provider_arn=${GITLAB_OIDC_PROVIDER_ARN}" \
+        -var="gitlab_subject=${GITLAB_OIDC_SUBJECT}"
+
+      API_ECR="$(tofu -chdir="$TF_DIR" output -raw api_ecr_url)"
+      WORKER_ECR="$(tofu -chdir="$TF_DIR" output -raw worker_ecr_url)"
+      aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+      docker build --pull -f backend/Dockerfile -t "${API_ECR}:${IMAGE_TAG}" backend
+      docker push "${API_ECR}:${IMAGE_TAG}"
+      docker tag "${API_ECR}:${IMAGE_TAG}" "${WORKER_ECR}:${IMAGE_TAG}"
+      docker push "${WORKER_ECR}:${IMAGE_TAG}"
+
+      # Populate Secrets Manager only after RDS and Redis endpoints exist.
+      export TF_DIR AWS_REGION
+      export OPENAI_API_KEY="$ENV_OPENAI_API_KEY"
+      export SECRET_KEY="$ENV_SECRET_KEY"
+      export BOOTSTRAP_ADMIN_EMAIL="${ENV_BOOTSTRAP_ADMIN_EMAIL:-}"
+      export BOOTSTRAP_ADMIN_PASSWORD="${ENV_BOOTSTRAP_ADMIN_PASSWORD:-}"
+      export MICROSOFT_TENANT_ID="$ENV_MICROSOFT_TENANT_ID"
+      export MICROSOFT_CLIENT_ID="$ENV_MICROSOFT_CLIENT_ID"
+      export MICROSOFT_CLIENT_SECRET="$ENV_MICROSOFT_CLIENT_SECRET"
+      CLOUDFRONT_DOMAIN_FOR_OAUTH="$(tofu -chdir="$TF_DIR" output -raw cloudfront_domain)"
+      export MICROSOFT_REDIRECT_URI="https://${CLOUDFRONT_DOMAIN_FOR_OAUTH}/api/v1/integrations/microsoft/callback"
+      export GOOGLE_MAPS_API_KEY="$ENV_GOOGLE_MAPS_API_KEY"
+      ./scripts/aws/set-runtime-secrets.sh
+
+      # Start the API and worker only after images and runtime secrets are ready.
+      tofu -chdir="$TF_DIR" apply -auto-approve \
+        -var="api_image_tag=${IMAGE_TAG}" \
+        -var="api_desired_count=${API_DESIRED_COUNT}" \
+        -var="worker_desired_count=${WORKER_DESIRED_COUNT}" \
+        -var="gitlab_oidc_provider_arn=${GITLAB_OIDC_PROVIDER_ARN}" \
+        -var="gitlab_subject=${GITLAB_OIDC_SUBJECT}"
+
+      FRONTEND_BUCKET="$(tofu -chdir="$TF_DIR" output -raw frontend_bucket)"
+      CLOUDFRONT_DOMAIN="$(tofu -chdir="$TF_DIR" output -raw cloudfront_domain)"
+      ECS_CLUSTER="$(tofu -chdir="$TF_DIR" output -raw ecs_cluster_name)"
+      API_SERVICE="$(tofu -chdir="$TF_DIR" output -raw api_service_name)"
+      WORKER_SERVICE="$(tofu -chdir="$TF_DIR" output -raw worker_service_name)"
+
+      (cd frontend && npm install --no-audit --no-fund && npm run build)
+      aws s3 sync frontend/dist "s3://${FRONTEND_BUCKET}/" --delete
+      DISTRIBUTION_ID="$(tofu -chdir="$TF_DIR" output -raw cloudfront_distribution_id)"
+      aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths '/*' >/dev/null
+      aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$API_SERVICE" "$WORKER_SERVICE"
+      printf 'Deployment complete: https://%s\n' "$CLOUDFRONT_DOMAIN"
+
+deploy_dev:
+  extends: .deploy_environment
+  stage: deploy_dev
+  variables:
+    TARGET_ENV: "dev"
+    CI_AWS_ROLE_ARN: "$AWS_ROLE_ARN_DEV"
+    ENV_OPENAI_API_KEY: "$OPENAI_API_KEY_DEV"
+    ENV_SECRET_KEY: "$SECRET_KEY_DEV"
+    ENV_BOOTSTRAP_ADMIN_EMAIL: "$BOOTSTRAP_ADMIN_EMAIL_DEV"
+    ENV_BOOTSTRAP_ADMIN_PASSWORD: "$BOOTSTRAP_ADMIN_PASSWORD_DEV"
+    ENV_MICROSOFT_TENANT_ID: "$MICROSOFT_TENANT_ID_DEV"
+    ENV_MICROSOFT_CLIENT_ID: "$MICROSOFT_CLIENT_ID_DEV"
+    ENV_MICROSOFT_CLIENT_SECRET: "$MICROSOFT_CLIENT_SECRET_DEV"
+    ENV_GOOGLE_MAPS_API_KEY: "$GOOGLE_MAPS_API_KEY_DEV"
+    ENV_ALB_CERTIFICATE_ARN: "$ALB_CERTIFICATE_ARN_DEV"
+    ENV_API_ORIGIN_DOMAIN_NAME: "$API_ORIGIN_DOMAIN_NAME_DEV"
+    ENV_ROUTE53_ZONE_ID: "$ROUTE53_ZONE_ID_DEV"
+    API_DESIRED_COUNT: "1"
+    WORKER_DESIRED_COUNT: "1"
+  environment:
+    name: development
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+deploy_prod:
+  extends: .deploy_environment
+  stage: deploy_prod
+  variables:
+    TARGET_ENV: "prod"
+    CI_AWS_ROLE_ARN: "$AWS_ROLE_ARN_PROD"
+    ENV_OPENAI_API_KEY: "$OPENAI_API_KEY_PROD"
+    ENV_SECRET_KEY: "$SECRET_KEY_PROD"
+    ENV_BOOTSTRAP_ADMIN_EMAIL: "$BOOTSTRAP_ADMIN_EMAIL_PROD"
+    ENV_BOOTSTRAP_ADMIN_PASSWORD: "$BOOTSTRAP_ADMIN_PASSWORD_PROD"
+    ENV_MICROSOFT_TENANT_ID: "$MICROSOFT_TENANT_ID_PROD"
+    ENV_MICROSOFT_CLIENT_ID: "$MICROSOFT_CLIENT_ID_PROD"
+    ENV_MICROSOFT_CLIENT_SECRET: "$MICROSOFT_CLIENT_SECRET_PROD"
+    ENV_GOOGLE_MAPS_API_KEY: "$GOOGLE_MAPS_API_KEY_PROD"
+    ENV_ALB_CERTIFICATE_ARN: "$ALB_CERTIFICATE_ARN_PROD"
+    ENV_API_ORIGIN_DOMAIN_NAME: "$API_ORIGIN_DOMAIN_NAME_PROD"
+    ENV_ROUTE53_ZONE_ID: "$ROUTE53_ZONE_ID_PROD"
+    API_DESIRED_COUNT: "2"
+    WORKER_DESIRED_COUNT: "1"
+  environment:
+    name: production
+  allow_failure: false
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
