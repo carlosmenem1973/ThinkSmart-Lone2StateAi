@@ -1,44 +1,300 @@
-const load = useCallback(async () => {
-  try {
-    const [leadsResponse, dashboardResponse] =
-      await Promise.all([
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  fetchAuthSession,
+  signIn as cognitoSignIn,
+  confirmSignIn as cognitoConfirmSignIn,
+  signOut as cognitoSignOut,
+  updatePassword,
+} from 'aws-amplify/auth';
+import {
+  Building2, Users, Search, Mail, CalendarClock, ChartNoAxesCombined,
+  RefreshCw, ShieldCheck, LogOut, LockKeyhole, UserPlus, Palette,
+  Bot, Globe2, Database, Play, CheckCircle2, LoaderCircle, MapPin,
+  TrendingUp, UserSearch, ClipboardCheck, Menu, X,
+} from 'lucide-react';
+
+const API = (import.meta.env.VITE_API_URL || '/api/v1').replace(/\/$/, '');
+
+type User = {
+  id: number;
+  email: string;
+  full_name: string;
+  role: 'admin' | 'seller';
+  territory?: string | null;
+  must_change_password: boolean;
+};
+
+type Branding = {
+  product_name: string;
+  customer_name: string;
+  tagline: string;
+  logo_url: string | null;
+  primary_color: string;
+  accent_color: string;
+};
+
+type Lead = {
+  id: number | string;
+  title?: string;
+  source_name?: string;
+  municipality?: string;
+  address?: string;
+  score?: number;
+  status?: string;
+  owner_name?: string;
+  owner_email?: string;
+};
+
+type Dashboard = {
+  total_leads?: number;
+  by_status?: { new?: number };
+  pending_followups?: number;
+  pending_drafts?: number;
+};
+
+type SearchMode = 'web' | 'internal';
+type Section = 'dashboard' | 'procura' | 'agents' | 'team' | 'settings';
+
+type Agent = {
+  id: string;
+  name: string;
+  description: string;
+  purpose: string;
+  icon: typeof Search;
+};
+
+const AGENTS: Agent[] = [
+  {
+    id: 'property-discovery',
+    name: 'Agente de Descoberta',
+    description: 'Identifica oportunidades imobiliárias em fontes autorizadas.',
+    purpose: 'Descoberta de imóveis',
+    icon: Search,
+  },
+  {
+    id: 'market-analyst',
+    name: 'Agente de Mercado',
+    description: 'Analisa preços, zonas, tendências e posicionamento.',
+    purpose: 'Análise de mercado',
+    icon: TrendingUp,
+  },
+  {
+    id: 'lead-qualifier',
+    name: 'Agente de Qualificação',
+    description: 'Organiza e classifica oportunidades para a equipa comercial.',
+    purpose: 'Qualificação de leads',
+    icon: ClipboardCheck,
+  },
+  {
+    id: 'owner-intelligence',
+    name: 'Agente de Proprietários',
+    description: 'Estrutura informação pública e validada sobre anúncios e contactos.',
+    purpose: 'Informação de proprietários',
+    icon: UserSearch,
+  },
+  {
+    id: 'email-intelligence',
+    name: 'Agente de Email',
+    description: 'Ajuda a organizar pedidos, mensagens e potenciais oportunidades.',
+    purpose: 'Inteligência de email',
+    icon: Mail,
+  },
+  {
+    id: 'follow-up-assistant',
+    name: 'Agente de Seguimento',
+    description: 'Prepara próximos passos e sugestões de acompanhamento.',
+    purpose: 'Seguimento comercial',
+    icon: CalendarClock,
+  },
+];
+
+const DEFAULT_BRANDING: Branding = {
+  product_name: 'ThinkSmart AI',
+  customer_name: 'Loft2 Real Estate',
+  tagline: 'Real Estate Intelligence',
+  logo_url: null,
+  primary_color: '#2563EB',
+  accent_color: '#16866C',
+};
+
+async function readResponse<T>(response: Response): Promise<T> {
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    throw new Error(`Resposta inesperada do servidor (${response.status}). Confirme VITE_API_URL e o backend.`);
+  }
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload?.detail || payload?.message || `Erro HTTP ${response.status}`);
+  }
+  return payload as T;
+}
+
+export default function App() {
+  const [token, setToken] = useState('');
+  const [user, setUser] = useState<User | null>(null);
+  const [booting, setBooting] = useState(true);
+
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [needsNewPassword, setNeedsNewPassword] = useState(false);
+  const [challengePassword, setChallengePassword] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [passwordMessage, setPasswordMessage] = useState('');
+
+  const [section, setSection] = useState<Section>('dashboard');
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [dash, setDash] = useState<Dashboard | null>(null);
+  const [dashboardBusy, setDashboardBusy] = useState(false);
+  const [dashboardError, setDashboardError] = useState('');
+
+  const [searchMode, setSearchMode] = useState<SearchMode>('web');
+  const [query, setQuery] = useState('Imóveis anunciados por proprietários particulares em Lisboa e arredores');
+  const [report, setReport] = useState('');
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [searchError, setSearchError] = useState('');
+
+  const [agentBusy, setAgentBusy] = useState<string | null>(null);
+  const [agentResults, setAgentResults] = useState<Record<string, string>>({});
+  const [agentError, setAgentError] = useState('');
+
+  const [sellerName, setSellerName] = useState('');
+  const [sellerEmail, setSellerEmail] = useState('');
+  const [sellerTerritory, setSellerTerritory] = useState('');
+  const [sellerResult, setSellerResult] = useState('');
+
+  const [branding, setBranding] = useState<Branding>(DEFAULT_BRANDING);
+  const [brandingMessage, setBrandingMessage] = useState('');
+  const [brandingBusy, setBrandingBusy] = useState(false);
+
+  const apiFetch = useCallback(async (path: string, init: RequestInit = {}) => {
+    const request = async (forceRefresh: boolean) => {
+      const session = await fetchAuthSession({ forceRefresh });
+      const access = session.tokens?.accessToken?.toString();
+      if (!access) throw new Error('Sessão expirada. Inicie sessão novamente.');
+
+      const headers = new Headers(init.headers);
+      headers.set('Authorization', `Bearer ${access}`);
+      if (init.body && !headers.has('Content-Type')) {
+        headers.set('Content-Type', 'application/json');
+      }
+
+      return fetch(`${API}${path}`, { ...init, headers });
+    };
+
+    let response = await request(false);
+    if (response.status === 401) response = await request(true);
+
+    if (response.status === 401) {
+      try { await cognitoSignOut(); } finally {
+        setToken('');
+        setUser(null);
+        setLeads([]);
+        setDash(null);
+      }
+    }
+    return response;
+  }, []);
+
+  const loadCognitoUser = useCallback(async () => {
+    const session = await fetchAuthSession({ forceRefresh: true });
+    const access = session.tokens?.accessToken?.toString();
+    if (!access) throw new Error('Sessão Cognito não encontrada.');
+
+    const response = await fetch(`${API}/auth/me`, {
+      headers: { Authorization: `Bearer ${access}` },
+    });
+    const profile = await readResponse<User>(response);
+    setToken(access);
+    setUser(profile);
+  }, []);
+
+  const loadDashboard = useCallback(async () => {
+    if (!user) return;
+    setDashboardBusy(true);
+    setDashboardError('');
+    try {
+      const [leadsResponse, dashboardResponse] = await Promise.all([
         apiFetch('/leads'),
         apiFetch('/dashboard'),
       ]);
-
-    if (!leadsResponse.ok) {
-      throw new Error(`Failed to load leads: ${leadsResponse.status}`);
+      const [leadsData, dashboardData] = await Promise.all([
+        readResponse<Lead[] | { items?: Lead[] }>(leadsResponse),
+        readResponse<Dashboard>(dashboardResponse),
+      ]);
+      setLeads(Array.isArray(leadsData) ? leadsData : (leadsData.items || []));
+      setDash(dashboardData);
+    } catch (error) {
+      setDashboardError(error instanceof Error ? error.message : 'Não foi possível carregar o dashboard.');
+    } finally {
+      setDashboardBusy(false);
     }
-
-    if (!dashboardResponse.ok) {
-      throw new Error(`Failed to load dashboard: ${dashboardResponse.status}`);
-    }
-
-    const leadsData = await leadsResponse.json();
-    const dashboardData = await dashboardResponse.json();
-
-    setLeads(
-      Array.isArray(leadsData)
-        ? leadsData
-        : (leadsData.items ?? [])
-    );
-
-    setDash(dashboardData);
-  } catch (error) {
-    console.error('Dashboard loading failed:', error);
-  }
-}, [token, apiFetch]);
-
-useEffect(() => {
-  if (token) void load();
-}, [token, load]);
+  }, [apiFetch, user]);
 
   useEffect(() => {
-    if (token) void load();
-  }, [token, load]);
+    let active = true;
+    (async () => {
+      try {
+        const session = await fetchAuthSession();
+        if (!session.tokens?.accessToken) return;
+
+        const access = session.tokens.accessToken.toString();
+        const response = await fetch(`${API}/auth/me`, {
+          headers: { Authorization: `Bearer ${access}` },
+        });
+        const profile = await readResponse<User>(response);
+        if (active) {
+          setToken(access);
+          setUser(profile);
+        }
+      } catch (error) {
+        console.error('Cognito session initialization failed:', error);
+        try { await cognitoSignOut(); } catch { /* no active session */ }
+      } finally {
+        if (active) setBooting(false);
+      }
+    })();
+
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    fetch(`${API}/settings/branding`)
+      .then(async response => {
+        if (!response.ok) return null;
+        return response.json();
+      })
+      .then(data => { if (active && data) setBranding({ ...DEFAULT_BRANDING, ...data }); })
+      .catch(error => console.warn('Branding could not be loaded:', error));
+
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    document.title = `${branding.product_name} | ${branding.customer_name}`;
+    document.documentElement.style.setProperty('--brand-primary', branding.primary_color);
+    document.documentElement.style.setProperty('--brand-accent', branding.accent_color);
+  }, [branding]);
+
+  useEffect(() => {
+    if (user && token) void loadDashboard();
+  }, [user, token, loadDashboard]);
+
+  const navItems = useMemo(() => [
+    { id: 'dashboard' as const, label: 'Dashboard', icon: ChartNoAxesCombined },
+    { id: 'procura' as const, label: 'Procura IA', icon: Search },
+    { id: 'agents' as const, label: 'Agentes IA', icon: Bot },
+    { id: 'team' as const, label: 'Equipa', icon: Users },
+    { id: 'settings' as const, label: 'Definições', icon: ShieldCheck },
+  ], []);
 
   async function signIn(event: FormEvent) {
-    event.preventDefault(); setLoginError('');
+    event.preventDefault();
+    setLoginError('');
     try {
       const result = await cognitoSignIn({ username: email.trim(), password });
       if (!result.isSignedIn) {
@@ -47,88 +303,413 @@ useEffect(() => {
           setLoginError('Defina uma nova palavra-passe para concluir o primeiro acesso.');
           return;
         }
-        setLoginError(`A autenticação exige uma etapa adicional (${result.nextStep.signInStep}). Configure o respetivo desafio Cognito.`);
+        setLoginError(`A autenticação exige uma etapa adicional: ${result.nextStep.signInStep}.`);
         return;
       }
       await loadCognitoUser();
       setPassword('');
-    } catch (error: any) {
-      setLoginError(error?.message || 'Não foi possível iniciar sessão');
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : 'Não foi possível iniciar sessão.');
+    }
+  }
+
+  async function completeFirstLogin(event: FormEvent) {
+    event.preventDefault();
+    setLoginError('');
+    try {
+      const result = await cognitoConfirmSignIn({ challengeResponse: challengePassword });
+      if (!result.isSignedIn) {
+        setLoginError(`Cognito exige outra etapa: ${result.nextStep.signInStep}`);
+        return;
+      }
+      setNeedsNewPassword(false);
+      setChallengePassword('');
+      setPassword('');
+      await loadCognitoUser();
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : 'Não foi possível concluir o primeiro acesso.');
     }
   }
 
   async function signOut() {
-    try { await cognitoSignOut(); } finally { setToken(''); setUser(null); setLeads([]); setDash(null); }
-  }
-
-  async function completeFirstLogin(event: FormEvent) {
-    event.preventDefault(); setLoginError('');
     try {
-      const result = await cognitoConfirmSignIn({ challengeResponse: challengePassword });
-      if (result.isSignedIn) {
-        setNeedsNewPassword(false); setChallengePassword(''); setPassword('');
-        await loadCognitoUser();
-      } else {
-        setLoginError(`Cognito exige outra etapa: ${result.nextStep.signInStep}`);
-      }
-    } catch (error: any) {
-      setLoginError(error?.message || 'Não foi possível concluir o primeiro acesso');
+      await cognitoSignOut();
+    } finally {
+      setToken('');
+      setUser(null);
+      setLeads([]);
+      setDash(null);
+      setSection('dashboard');
     }
   }
 
-  useEffect(() => { document.title = `${branding.product_name} | ${branding.customer_name}`; document.documentElement.style.setProperty('--brand-primary', branding.primary_color); document.documentElement.style.setProperty('--brand-accent', branding.accent_color); }, [branding]);
-
-  async function research() {
-    setBusy(true);
-    try {
-      const response = await apiFetch(`/research?query=${encodeURIComponent(query)}`, { method: 'POST' });
-      const contentType = response.headers.get('content-type') || '';
-      const data = contentType.includes('application/json')
-        ? await response.json()
-        : { detail: `Resposta inesperada do servidor (${response.status}). Verifique VITE_API_URL e o backend.` };
-      if (!response.ok) throw new Error(data.detail || `Erro HTTP ${response.status}`);
-      setReport(data.text || data.detail || 'Sem resultados');
-    } catch (error: any) {
-      setReport(error?.message || 'Não foi possível concluir a pesquisa.');
-    } finally { setBusy(false); }
-  }
-
   async function changePassword(event: FormEvent) {
-    event.preventDefault(); setPasswordMessage('');
+    event.preventDefault();
+    setPasswordMessage('');
     try {
       await updatePassword({ oldPassword: currentPassword, newPassword });
       setPasswordMessage('Palavra-passe alterada com sucesso.');
-      setCurrentPassword(''); setNewPassword('');
-    } catch (error: any) {
-      setPasswordMessage(error?.message || 'Não foi possível alterar a palavra-passe');
+      setCurrentPassword('');
+      setNewPassword('');
+      const refreshed = await loadCognitoUser();
+      void refreshed;
+    } catch (error) {
+      setPasswordMessage(error instanceof Error ? error.message : 'Não foi possível alterar a palavra-passe.');
+    }
+  }
+
+  async function runSearch(event: FormEvent) {
+    event.preventDefault();
+    if (!query.trim()) {
+      setSearchError('Introduza uma pesquisa.');
+      return;
+    }
+
+    setSearchBusy(true);
+    setSearchError('');
+    setReport('');
+    try {
+      // API contract: POST /research?query=...&source=web|internal
+      const params = new URLSearchParams({ query: query.trim(), source: searchMode });
+      const response = await apiFetch(`/research?${params.toString()}`, { method: 'POST' });
+      const data = await readResponse<{ text?: string; detail?: string; items?: unknown[] }>(response);
+      setReport(data.text || data.detail || JSON.stringify(data.items || data, null, 2));
+    } catch (error) {
+      setSearchError(error instanceof Error ? error.message : 'A pesquisa não foi concluída.');
+    } finally {
+      setSearchBusy(false);
+    }
+  }
+
+  async function runAgent(agent: Agent) {
+    setAgentBusy(agent.id);
+    setAgentError('');
+    try {
+      // API contract: POST /agents/{agent_id}/run
+      const response = await apiFetch(`/agents/${encodeURIComponent(agent.id)}/run`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      const data = await readResponse<{ text?: string; result?: unknown; message?: string }>(response);
+      const result = data.text || data.message || (
+        typeof data.result === 'string' ? data.result : JSON.stringify(data.result ?? data, null, 2)
+      );
+      setAgentResults(previous => ({ ...previous, [agent.id]: result }));
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : `Não foi possível executar ${agent.name}.`);
+    } finally {
+      setAgentBusy(null);
     }
   }
 
   async function saveBranding(event: FormEvent) {
-    event.preventDefault(); setBrandingBusy(true); setBrandingMessage('');
+    event.preventDefault();
+    setBrandingBusy(true);
+    setBrandingMessage('');
     try {
-      const response = await apiFetch('/settings/branding', { method: 'PUT', body: JSON.stringify(branding) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || 'Não foi possível guardar a identidade visual');
-      setBranding(data); setBrandingMessage('Identidade visual guardada. A alteração já está aplicada.');
-    } catch (error: any) { setBrandingMessage(error.message || 'Erro ao guardar'); } finally { setBrandingBusy(false); }
+      const response = await apiFetch('/settings/branding', {
+        method: 'PUT',
+        body: JSON.stringify(branding),
+      });
+      const data = await readResponse<Branding>(response);
+      setBranding({ ...DEFAULT_BRANDING, ...data });
+      setBrandingMessage('Identidade visual guardada.');
+    } catch (error) {
+      setBrandingMessage(error instanceof Error ? error.message : 'Não foi possível guardar a identidade visual.');
+    } finally {
+      setBrandingBusy(false);
+    }
   }
 
   async function createSeller(event: FormEvent) {
-    event.preventDefault(); setSellerResult('');
-    const response = await apiFetch('/auth/users', { method: 'POST', body: JSON.stringify({ email: sellerEmail, full_name: sellerName, territory: sellerTerritory || null, role: 'seller' }) });
-    const data = await response.json();
-    if (!response.ok) { setSellerResult(data.detail || 'Erro ao criar vendedor'); return; }
-    setSellerResult(data.message || `Convite Cognito enviado para ${data.user.email}.`);
-    setSellerName(''); setSellerEmail(''); setSellerTerritory('');
+    event.preventDefault();
+    setSellerResult('');
+    try {
+      const response = await apiFetch('/auth/users', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: sellerEmail.trim(),
+          full_name: sellerName.trim(),
+          territory: sellerTerritory.trim() || null,
+          role: 'seller',
+        }),
+      });
+      const data = await readResponse<{ message?: string; user?: { email?: string } }>(response);
+      setSellerResult(data.message || `Convite enviado para ${data.user?.email || sellerEmail}.`);
+      setSellerName('');
+      setSellerEmail('');
+      setSellerTerritory('');
+    } catch (error) {
+      setSellerResult(error instanceof Error ? error.message : 'Não foi possível criar o vendedor.');
+    }
   }
 
-  if (booting) return <div className="auth-page"><div className="auth-card">A validar sessão…</div></div>;
-  if (needsNewPassword) return <div className="auth-page"><form className="auth-card" onSubmit={completeFirstLogin}><div className="auth-brand"><Building2 size={34}/><b>ThinkSmart AI</b></div><h1>Primeiro acesso</h1><p>Defina uma nova palavra-passe para concluir o convite da sua conta.</p><label>Nova palavra-passe</label><input type="password" minLength={12} required autoComplete="new-password" value={challengePassword} onChange={e => setChallengePassword(e.target.value)}/>{loginError && <div className="auth-error">{loginError}</div>}<button className="auth-submit" type="submit">Guardar palavra-passe</button></form></div>;
-  if (!user || !token) return <div className="auth-page"><form className="auth-card" onSubmit={signIn}><div className="auth-brand">{branding.logo_url ? <img src={branding.logo_url} alt="Company logo"/> : <Building2 size={34}/>}<div>{branding.product_name}<br/><b>{branding.customer_name}</b></div></div><small className="eyebrow">REAL ESTATE INTELLIGENCE · PORTUGAL</small><h1>Iniciar sessão</h1><p>Aceda ao espaço seguro da sua equipa imobiliária.</p><label>Email profissional</label><input type="email" autoComplete="username" required value={email} onChange={e => setEmail(e.target.value)} placeholder="nome@empresa.pt"/><label>Palavra-passe</label><input type="password" autoComplete="current-password" required value={password} onChange={e => setPassword(e.target.value)} placeholder="A sua palavra-passe"/>{loginError && <div className="auth-error">{loginError}</div>}<button className="auth-submit" type="submit"><LockKeyhole size={16}/> Entrar</button><small className="auth-note">Acesso individual · Registo de auditoria · Sessão protegida</small></form></div>;
+  function navigate(next: Section) {
+    setSection(next);
+    setMobileNavOpen(false);
+  }
 
-  if (user.must_change_password) return <div className="auth-page"><form className="auth-card" onSubmit={changePassword}><div className="auth-brand"><LockKeyhole size={32}/><b>Alterar palavra-passe</b></div><h1>Primeiro acesso</h1><p>Por segurança, defina uma palavra-passe nova antes de continuar. Use pelo menos 12 caracteres.</p><label>Palavra-passe temporária / atual</label><input type="password" required value={currentPassword} onChange={e => setCurrentPassword(e.target.value)}/><label>Nova palavra-passe</label><input type="password" minLength={12} required value={newPassword} onChange={e => setNewPassword(e.target.value)}/>{passwordMessage && <div className="auth-error">{passwordMessage}</div>}<button className="auth-submit" type="submit">Guardar nova palavra-passe</button></form></div>;
+  if (booting) {
+    return <div className="auth-page"><div className="auth-card">A validar sessão…</div></div>;
+  }
 
-  return <div className="shell"><aside><div className="brand">{branding.logo_url ? <img src={branding.logo_url} alt="Company logo"/> : <Building2/>}<span>{branding.product_name}<br/><b>{branding.customer_name}</b></span></div><nav><a className="active"><ChartNoAxesCombined/> Dashboard</a><a><Users/> Leads & Sellers</a><a><Search/> AI Discovery</a><a><Mail/> Email Intelligence</a><a><CalendarClock/> Follow-ups</a><a><ShieldCheck/> Approvals & GDPR</a></nav><div className="sidefoot">Portugal · Europe/Lisbon<br/>AI-assisted CRM</div></aside><main><header><div><small>{branding.tagline.toUpperCase()}</small><h1>Sales overview</h1><p>Descobrir oportunidades. Qualificar leads. Ajudar os vendedores.</p></div><div className="user-menu"><div><b>{user.full_name}</b><small>{user.role === 'admin' ? 'Administrador' : 'Vendedor'} · {user.territory || user.email}</small></div><button className="secondary" onClick={signOut}><LogOut size={15}/> Sair</button></div></header><section className="stats"><Stat title="Total leads" value={dash?.total_leads??'—'} icon={<Users/>}/><Stat title="New leads" value={dash?.by_status?.new??'—'} icon={<Search/>}/><Stat title="Pending follow-ups" value={dash?.pending_followups??'—'} icon={<CalendarClock/>}/><Stat title="Drafts to review" value={dash?.pending_drafts??'—'} icon={<Mail/>}/></section><section className="panel"><div className="panelhead"><div><h2>AI property discovery</h2><p>Pesquisar oportunidades em fontes públicas e permitidas.</p></div><span className="pill">OpenAI web search</span></div><div className="searchrow"><input value={query} onChange={e=>setQuery(e.target.value)}/><button disabled={busy} onClick={research}>{busy?'A pesquisar…':<><Search size={16}/> Research</>}</button></div>{report&&<pre className="report">{report}</pre>}</section>{user.role === 'admin' && <section className="panel branding-panel"><div className="panelhead"><div><h2><Palette size={18}/> Identidade visual</h2><p>Altere o nome do produto, o cliente, o logótipo e as cores sem novo deploy.</p></div></div><form className="branding-form" onSubmit={saveBranding}><label>Nome do produto<input required maxLength={100} value={branding.product_name} onChange={e=>setBranding({...branding, product_name:e.target.value})}/></label><label>Nome do cliente<input required maxLength={160} value={branding.customer_name} onChange={e=>setBranding({...branding, customer_name:e.target.value})}/></label><label>Subtítulo<input maxLength={240} value={branding.tagline} onChange={e=>setBranding({...branding, tagline:e.target.value})}/></label><label>URL do logótipo (HTTPS ou caminho /)<input value={branding.logo_url || ''} onChange={e=>setBranding({...branding, logo_url:e.target.value || null})} placeholder="https://.../logo.svg"/></label><label>Cor principal<div className="color-field"><input type="color" value={branding.primary_color} onChange={e=>setBranding({...branding, primary_color:e.target.value})}/><code>{branding.primary_color}</code></div></label><label>Cor de destaque<div className="color-field"><input type="color" value={branding.accent_color} onChange={e=>setBranding({...branding, accent_color:e.target.value})}/><code>{branding.accent_color}</code></div></label><div className="branding-preview" style={{borderColor:branding.primary_color}}><b style={{color:branding.primary_color}}>{branding.product_name}</b><span>{branding.customer_name}</span><small>{branding.tagline}</small></div><button type="submit" disabled={brandingBusy}>{brandingBusy?'A guardar…':'Guardar identidade visual'}</button>{brandingMessage && <p className="branding-message">{brandingMessage}</p>}</form></section>}{user.role === 'admin' && <section className="panel"><div className="panelhead"><div><h2>Contas da equipa</h2><p>Criar acessos individuais para os cinco vendedores.</p></div><UserPlus/></div><form className="seller-form" onSubmit={createSeller}><input required placeholder="Nome completo" value={sellerName} onChange={e=>setSellerName(e.target.value)}/><input required type="email" placeholder="Email profissional" value={sellerEmail} onChange={e=>setSellerEmail(e.target.value)}/><input placeholder="Território (ex.: Lisboa)" value={sellerTerritory} onChange={e=>setSellerTerritory(e.target.value)}/><button type="submit">Criar vendedor</button></form>{sellerResult && <pre className="report">{sellerResult}</pre>}</section>}<section className="panel"><div className="panelhead"><div><h2>Latest leads</h2><p>Oportunidades identificadas e registadas.</p></div><button className="secondary" onClick={load}><RefreshCw size={15}/> Refresh</button></div><div className="tablewrap"><table><thead><tr><th>Opportunity</th><th>Location</th><th>Score</th><th>Status</th><th>Owner contact</th></tr></thead><tbody>{leads.map(l=><tr key={l.id}><td><b>{l.title}</b><small>{l.source_name||'Source pending'}</small></td><td>{l.municipality||l.address||'—'}</td><td><span className="score">{l.score}/100</span></td><td><span className="status">{l.status}</span></td><td>{l.owner_name||'Not verified'}<small>{l.owner_email||'No email'}</small></td></tr>)}{!leads.length&&<tr><td colSpan={5} className="empty">Ainda não existem leads atribuídos a esta conta.</td></tr>}</tbody></table></div></section><footer>{branding.product_name} | {branding.customer_name} · Human approval required · Dados pessoais tratados com controlo de acesso</footer></main></div>;
+  if (needsNewPassword) {
+    return (
+      <div className="auth-page">
+        <form className="auth-card" onSubmit={completeFirstLogin}>
+          <div className="auth-brand"><Building2 size={34} /><b>ThinkSmart AI</b></div>
+          <h1>Primeiro acesso</h1>
+          <p>Defina uma nova palavra-passe para concluir o convite da sua conta.</p>
+          <label>Nova palavra-passe</label>
+          <input type="password" minLength={12} required autoComplete="new-password"
+            value={challengePassword} onChange={event => setChallengePassword(event.target.value)} />
+          {loginError && <div className="auth-error">{loginError}</div>}
+          <button className="auth-submit" type="submit">Guardar palavra-passe</button>
+        </form>
+      </div>
+    );
+  }
+
+  if (!user || !token) {
+    return (
+      <div className="auth-page">
+        <form className="auth-card" onSubmit={signIn}>
+          <div className="auth-brand">
+            {branding.logo_url ? <img src={branding.logo_url} alt="Logótipo" /> : <Building2 size={34} />}
+            <div>{branding.product_name}<br /><b>{branding.customer_name}</b></div>
+          </div>
+          <small className="eyebrow">REAL ESTATE INTELLIGENCE · PORTUGAL</small>
+          <h1>Iniciar sessão</h1>
+          <p>Aceda ao espaço seguro da sua equipa imobiliária.</p>
+          <label>Email profissional</label>
+          <input type="email" autoComplete="username" required value={email}
+            onChange={event => setEmail(event.target.value)} placeholder="nome@empresa.pt" />
+          <label>Palavra-passe</label>
+          <input type="password" autoComplete="current-password" required value={password}
+            onChange={event => setPassword(event.target.value)} placeholder="A sua palavra-passe" />
+          {loginError && <div className="auth-error">{loginError}</div>}
+          <button className="auth-submit" type="submit"><LockKeyhole size={16} /> Entrar</button>
+          <small className="auth-note">Acesso individual · Sessão protegida</small>
+        </form>
+      </div>
+    );
+  }
+
+  if (user.must_change_password) {
+    return (
+      <div className="auth-page">
+        <form className="auth-card" onSubmit={changePassword}>
+          <div className="auth-brand"><LockKeyhole size={32} /><b>Alterar palavra-passe</b></div>
+          <h1>Primeiro acesso</h1>
+          <p>Por segurança, defina uma nova palavra-passe antes de continuar.</p>
+          <label>Palavra-passe atual</label>
+          <input type="password" required autoComplete="current-password" value={currentPassword}
+            onChange={event => setCurrentPassword(event.target.value)} />
+          <label>Nova palavra-passe</label>
+          <input type="password" minLength={12} required autoComplete="new-password" value={newPassword}
+            onChange={event => setNewPassword(event.target.value)} />
+          {passwordMessage && <div className="auth-error">{passwordMessage}</div>}
+          <button className="auth-submit" type="submit">Guardar nova palavra-passe</button>
+        </form>
+      </div>
+    );
+  }
+
+  return (
+    <div className="shell">
+      <aside className={mobileNavOpen ? 'sidebar open' : 'sidebar'}>
+        <div className="brand">
+          {branding.logo_url ? <img src={branding.logo_url} alt="Logótipo" /> : <Building2 />}
+          <span>{branding.product_name}<br /><b>{branding.customer_name}</b></span>
+          <button className="mobile-close" onClick={() => setMobileNavOpen(false)} aria-label="Fechar menu"><X /></button>
+        </div>
+        <nav>
+          {navItems.map(item => {
+            const Icon = item.icon;
+            return (
+              <button key={item.id} className={section === item.id ? 'nav-link active' : 'nav-link'}
+                onClick={() => navigate(item.id)}>
+                <Icon size={18} /> {item.label}
+              </button>
+            );
+          })}
+        </nav>
+        <div className="sidefoot">Portugal · Europe/Lisbon<br />Apoio à decisão imobiliária</div>
+      </aside>
+
+      <main>
+        <header>
+          <button className="mobile-menu" onClick={() => setMobileNavOpen(true)} aria-label="Abrir menu"><Menu /></button>
+          <div>
+            <small>{branding.tagline.toUpperCase()}</small>
+            <h1>{section === 'procura' ? 'Procura IA' : section === 'agents' ? 'Agentes IA' : section === 'team' ? 'Equipa' : section === 'settings' ? 'Definições' : 'Dashboard'}</h1>
+            <p>Descobrir oportunidades. Qualificar leads. Apoiar a equipa.</p>
+          </div>
+          <div className="user-menu">
+            <div><b>{user.full_name}</b><small>{user.role === 'admin' ? 'Administrador' : 'Vendedor'} · {user.territory || user.email}</small></div>
+            <button className="secondary" onClick={signOut}><LogOut size={15} /> Sair</button>
+          </div>
+        </header>
+
+        {section === 'dashboard' && (
+          <>
+            <section className="stats">
+              <Stat title="Total de leads" value={dash?.total_leads ?? '—'} icon={<Users />} />
+              <Stat title="Novos leads" value={dash?.by_status?.new ?? '—'} icon={<Search />} />
+              <Stat title="Seguimentos pendentes" value={dash?.pending_followups ?? '—'} icon={<CalendarClock />} />
+              <Stat title="Rascunhos para rever" value={dash?.pending_drafts ?? '—'} icon={<Mail />} />
+            </section>
+            <section className="panel">
+              <div className="panelhead">
+                <div><h2>Últimas oportunidades</h2><p>Oportunidades identificadas e registadas.</p></div>
+                <button className="secondary" disabled={dashboardBusy} onClick={() => void loadDashboard()}>
+                  {dashboardBusy ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />} Atualizar
+                </button>
+              </div>
+              {dashboardError && <div className="auth-error">{dashboardError}</div>}
+              <LeadTable leads={leads} />
+            </section>
+          </>
+        )}
+
+        {section === 'procura' && (
+          <section className="panel">
+            <div className="panelhead">
+              <div><h2><Search size={19} /> Pesquisa imobiliária</h2><p>Pesquise oportunidades na web ou na informação interna da plataforma.</p></div>
+            </div>
+            <div className="mode-switch" role="group" aria-label="Origem da pesquisa">
+              <button type="button" className={searchMode === 'web' ? 'mode-option selected' : 'mode-option'} onClick={() => setSearchMode('web')}>
+                <Globe2 size={17} /> Pesquisa Web
+              </button>
+              <button type="button" className={searchMode === 'internal' ? 'mode-option selected' : 'mode-option'} onClick={() => setSearchMode('internal')}>
+                <Database size={17} /> Pesquisa Interna
+              </button>
+            </div>
+            <form className="searchrow" onSubmit={runSearch}>
+              <input value={query} onChange={event => setQuery(event.target.value)}
+                placeholder="Ex.: apartamentos T2 em Lisboa até 350.000 €" />
+              <button disabled={searchBusy || !query.trim()} type="submit">
+                {searchBusy ? <><LoaderCircle className="spin" size={16} /> A pesquisar…</> : <><Search size={16} /> Procurar</>}
+              </button>
+            </form>
+            {searchError && <div className="auth-error">{searchError}</div>}
+            {report && <pre className="report">{report}</pre>}
+            {!report && !searchError && <div className="empty-state"><MapPin size={25} /><b>Encontre a próxima oportunidade</b><span>Escolha a origem, descreva o imóvel e inicie a pesquisa.</span></div>}
+          </section>
+        )}
+
+        {section === 'agents' && (
+          <>
+            <section className="panel">
+              <div className="panelhead">
+                <div><h2><Bot size={19} /> Os seis agentes da plataforma</h2><p>Execute tarefas especializadas. Os resultados ficam visíveis para revisão humana.</p></div>
+              </div>
+              {agentError && <div className="auth-error">{agentError}</div>}
+              <div className="agent-grid">
+                {AGENTS.map(agent => {
+                  const Icon = agent.icon;
+                  const running = agentBusy === agent.id;
+                  return (
+                    <article className="agent-card" key={agent.id}>
+                      <div className="agent-icon"><Icon size={21} /></div>
+                      <h3>{agent.name}</h3>
+                      <p>{agent.description}</p>
+                      <small>{agent.purpose}</small>
+                      <button disabled={!!agentBusy} onClick={() => void runAgent(agent)}>
+                        {running ? <><LoaderCircle className="spin" size={15} /> A executar…</> : <><Play size={15} /> Executar agente</>}
+                      </button>
+                      {agentResults[agent.id] && <pre className="report agent-result">{agentResults[agent.id]}</pre>}
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          </>
+        )}
+
+        {section === 'team' && (
+          <>
+            {user.role === 'admin' ? (
+              <section className="panel">
+                <div className="panelhead"><div><h2><UserPlus size={19} /> Criar conta de vendedor</h2><p>Convide um membro da equipa para a plataforma.</p></div></div>
+                <form className="seller-form" onSubmit={createSeller}>
+                  <input required placeholder="Nome completo" value={sellerName} onChange={event => setSellerName(event.target.value)} />
+                  <input required type="email" placeholder="Email profissional" value={sellerEmail} onChange={event => setSellerEmail(event.target.value)} />
+                  <input placeholder="Território (ex.: Lisboa)" value={sellerTerritory} onChange={event => setSellerTerritory(event.target.value)} />
+                  <button type="submit">Criar vendedor</button>
+                </form>
+                {sellerResult && <pre className="report">{sellerResult}</pre>}
+              </section>
+            ) : (
+              <section className="panel"><h2>Área da equipa</h2><p>Esta operação está disponível para administradores.</p></section>
+            )}
+            <section className="panel"><div className="panelhead"><div><h2>Oportunidades atribuídas</h2><p>Leads visíveis para a sua conta.</p></div></div><LeadTable leads={leads} /></section>
+          </>
+        )}
+
+        {section === 'settings' && (
+          <>
+            <section className="panel">
+              <div className="panelhead"><div><h2><ShieldCheck size={19} /> Segurança da conta</h2><p>A palavra-passe é gerida pela sua conta de autenticação.</p></div></div>
+              <form className="seller-form" onSubmit={changePassword}>
+                <input type="password" required placeholder="Palavra-passe atual" autoComplete="current-password"
+                  value={currentPassword} onChange={event => setCurrentPassword(event.target.value)} />
+                <input type="password" required minLength={12} placeholder="Nova palavra-passe" autoComplete="new-password"
+                  value={newPassword} onChange={event => setNewPassword(event.target.value)} />
+                <button type="submit">Alterar palavra-passe</button>
+              </form>
+              {passwordMessage && <p className="branding-message">{passwordMessage}</p>}
+            </section>
+
+            {user.role === 'admin' && (
+              <section className="panel branding-panel">
+                <div className="panelhead"><div><h2><Palette size={19} /> Identidade visual</h2><p>Personalize a marca sem alterar a configuração de autenticação.</p></div></div>
+                <form className="branding-form" onSubmit={saveBranding}>
+                  <label>Nome do produto<input required maxLength={100} value={branding.product_name} onChange={event => setBranding({ ...branding, product_name: event.target.value })} /></label>
+                  <label>Nome do cliente<input required maxLength={160} value={branding.customer_name} onChange={event => setBranding({ ...branding, customer_name: event.target.value })} /></label>
+                  <label>Subtítulo<input maxLength={240} value={branding.tagline} onChange={event => setBranding({ ...branding, tagline: event.target.value })} /></label>
+                  <label>URL do logótipo<input type="url" value={branding.logo_url || ''} onChange={event => setBranding({ ...branding, logo_url: event.target.value || null })} placeholder="https://..." /></label>
+                  <label>Cor principal<div className="color-field"><input type="color" value={branding.primary_color} onChange={event => setBranding({ ...branding, primary_color: event.target.value })} /><code>{branding.primary_color}</code></div></label>
+                  <label>Cor de destaque<div className="color-field"><input type="color" value={branding.accent_color} onChange={event => setBranding({ ...branding, accent_color: event.target.value })} /><code>{branding.accent_color}</code></div></label>
+                  <div className="branding-preview" style={{ borderColor: branding.primary_color }}>
+                    <b style={{ color: branding.primary_color }}>{branding.product_name}</b><span>{branding.customer_name}</span><small>{branding.tagline}</small>
+                  </div>
+                  <button type="submit" disabled={brandingBusy}>{brandingBusy ? 'A guardar…' : 'Guardar identidade visual'}</button>
+                  {brandingMessage && <p className="branding-message">{brandingMessage}</p>}
+                </form>
+              </section>
+            )}
+          </>
+        )}
+
+        <footer>{branding.product_name} | {branding.customer_name} · Revisão humana antes de ações externas · Dados sujeitos a controlo de acesso</footer>
+      </main>
+    </div>
+  );
 }
-function Stat({title,value,icon}:{title:string,value:any,icon:any}){return <div className="stat"><div className="staticon">{icon}</div><small>{title}</small><strong>{value}</strong></div>}
+
+function Stat({ title, value, icon }: { title: string; value: string | number; icon: React.ReactNode }) {
+  return <div className="stat"><div className="staticon">{icon}</div><small>{title}</small><strong>{value}</strong></div>;
+}
+
+function LeadTable({ leads }: { leads: Lead[] }) {
+  return (
+    <div className="tablewrap">
+      <table>
+        <thead><tr><th>Oportunidade</th><th>Localização</th><th>Score</th><th>Estado</th><th>Contacto</th></tr></thead>
+        <tbody>
+          {leads.map(lead => (
+            <tr key={lead.id}>
+              <td><b>{lead.title || 'Oportunidade sem título'}</b><small>{lead.source_name || 'Fonte por confirmar'}</small></td>
+              <td>{lead.municipality || lead.address || '—'}</td>
+              <td><span className="score">{lead.score == null ? '—' : `${lead.score}/100`}</span></td>
+              <td><span className="status">{lead.status || 'Por classificar'}</span></td>
+              <td>{lead.owner_name || 'Não verificado'}<small>{lead.owner_email || 'Sem email'}</small></td>
+            </tr>
+          ))}
+          {!leads.length && <tr><td colSpan={5} className="empty">Ainda não existem leads atribuídos a esta conta.</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  );
+}
