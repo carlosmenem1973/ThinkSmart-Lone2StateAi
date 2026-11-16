@@ -1,86 +1,29 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react';
-import { fetchAuthSession, signIn as cognitoSignIn, confirmSignIn as cognitoConfirmSignIn, signOut as cognitoSignOut, updatePassword } from 'aws-amplify/auth';
-import { Building2, Users, Search, Mail, CalendarClock, ChartNoAxesCombined, RefreshCw, ShieldCheck, LogOut, LockKeyhole, UserPlus, Palette } from 'lucide-react';
+    try {
+      const [leadsResponse, dashboardResponse] = await Promise.all([
+        apiFetch('/leads'),
+        apiFetch('/dashboard'),
+      ]);
 
-const API = import.meta.env.VITE_API_URL || '/api/v1';
-type User = { id: number; email: string; full_name: string; role: 'admin' | 'seller'; territory?: string | null; must_change_password: boolean };
-type Branding = { product_name: string; customer_name: string; tagline: string; logo_url: string | null; primary_color: string; accent_color: string };
+      if (!leadsResponse.ok) {
+        throw new Error(`Não foi possível carregar os leads (${leadsResponse.status})`);
+      }
+      if (!dashboardResponse.ok) {
+        throw new Error(`Não foi possível carregar o dashboard (${dashboardResponse.status})`);
+      }
 
-export default function App() {
-  const [token, setToken] = useState('');
-  const [user, setUser] = useState<User | null>(null);
-  const [booting, setBooting] = useState(true);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loginError, setLoginError] = useState('');
-  const [needsNewPassword, setNeedsNewPassword] = useState(false);
-  const [challengePassword, setChallengePassword] = useState('');
-  const [query, setQuery] = useState('Imóveis anunciados por proprietários particulares em Lisboa e arredores');
-  const [leads, setLeads] = useState<any[]>([]);
-  const [dash, setDash] = useState<any>(null);
-  const [report, setReport] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [newPassword, setNewPassword] = useState('');
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [passwordMessage, setPasswordMessage] = useState('');
-  const [sellerName, setSellerName] = useState('');
-  const [sellerEmail, setSellerEmail] = useState('');
-  const [sellerTerritory, setSellerTerritory] = useState('');
-  const [sellerResult, setSellerResult] = useState('');
-  const [branding, setBranding] = useState<Branding>({ product_name: 'ThinkSmart AI', customer_name: 'Loft2 Real Estate', tagline: 'Real Estate Intelligence', logo_url: null, primary_color: '#2563EB', accent_color: '#16866C' });
-  const [brandingMessage, setBrandingMessage] = useState('');
-  const [brandingBusy, setBrandingBusy] = useState(false);
+      const leadsData = await leadsResponse.json();
+      const dashboardData = await dashboardResponse.json();
 
-  const loadCognitoUser = useCallback(async () => {
-    const session = await fetchAuthSession();
-    const access = session.tokens?.accessToken?.toString();
-    if (!access) throw new Error('Sessão Cognito não encontrada');
-    setToken(access);
-    const response = await fetch(`${API}/auth/me`, {
-      headers: { Authorization: `Bearer ${access}` },
-    });
-    if (!response.ok) throw new Error('Não foi possível carregar o perfil da aplicação');
-    setUser(await response.json());
-  }, []);
+      setLeads(Array.isArray(leadsData) ? leadsData : (leadsData.items ?? []));
+      setDash(dashboardData);
+    } catch (error) {
+      console.error('Dashboard loading failed:', error);
+    }
+  }, [token, apiFetch]);
 
   useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const session = await fetchAuthSession();
-        if (!session.tokens?.accessToken) return;
-        const access = session.tokens.accessToken.toString();
-        const response = await fetch(`${API}/auth/me`, { headers: { Authorization: `Bearer ${access}` } });
-        if (!response.ok) throw new Error('Perfil de utilizador indisponível');
-        const profile = await response.json();
-        if (active) { setToken(access); setUser(profile); }
-      } catch (error) {
-        console.error('Cognito session initialization:', error);
-        try { await cognitoSignOut(); } catch { /* no active session */ }
-      } finally { if (active) setBooting(false); }
-    })();
-    return () => { active = false; };
-  }, []);
-
-  useEffect(() => { fetch(`${API}/settings/branding`).then(async r => { if (r.ok) setBranding(await r.json()); }).catch(console.error); }, []);
-
-  const apiFetch = useCallback(async (path: string, init: RequestInit = {}) => {
-    const makeRequest = async (forceRefresh = false) => {
-      const session = await fetchAuthSession({ forceRefresh });
-      const access = session.tokens?.accessToken?.toString();
-      if (!access) throw new Error('Sessão expirada. Inicie sessão novamente.');
-      const headers = new Headers(init.headers);
-      if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-      headers.set('Authorization', `Bearer ${access}`);
-      return fetch(`${API}${path}`, { ...init, headers });
-    };
-    let response = await makeRequest(false);
-    if (response.status === 401) response = await makeRequest(true);
-    if (response.status === 401) {
-      await cognitoSignOut(); setToken(''); setUser(null);
-    }
-    return response;
-  }, []);
+    if (token) void load();
+  }, [token, load]);
 
   async function signIn(event: FormEvent) {
     event.preventDefault(); setLoginError('');
@@ -127,7 +70,14 @@ export default function App() {
     setBusy(true);
     try {
       const response = await apiFetch(`/research?query=${encodeURIComponent(query)}`, { method: 'POST' });
-      const data = await response.json(); setReport(data.text || data.detail || 'Sem resultados');
+      const contentType = response.headers.get('content-type') || '';
+      const data = contentType.includes('application/json')
+        ? await response.json()
+        : { detail: `Resposta inesperada do servidor (${response.status}). Verifique VITE_API_URL e o backend.` };
+      if (!response.ok) throw new Error(data.detail || `Erro HTTP ${response.status}`);
+      setReport(data.text || data.detail || 'Sem resultados');
+    } catch (error: any) {
+      setReport(error?.message || 'Não foi possível concluir a pesquisa.');
     } finally { setBusy(false); }
   }
 
