@@ -133,6 +133,7 @@ export default function App() {
   const [token, setToken] = useState('');
   const [user, setUser] = useState<User | null>(null);
   const [booting, setBooting] = useState(true);
+  const [hasCognitoSession, setHasCognitoSession] = useState(false);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -202,7 +203,11 @@ export default function App() {
   const loadCognitoUser = useCallback(async () => {
     const session = await fetchAuthSession({ forceRefresh: true });
     const access = session.tokens?.accessToken?.toString();
-    if (!access) throw new Error('Sessão Cognito não encontrada.');
+    if (!access) {
+      setHasCognitoSession(false);
+      throw new Error('Sessão Cognito não encontrada.');
+    }
+    setHasCognitoSession(true);
 
     const response = await fetch(`${API}/auth/me`, {
       headers: { Authorization: `Bearer ${access}` },
@@ -239,20 +244,36 @@ export default function App() {
     (async () => {
       try {
         const session = await fetchAuthSession();
-        if (!session.tokens?.accessToken) return;
+        const access = session.tokens?.accessToken?.toString();
 
-        const access = session.tokens.accessToken.toString();
+        if (!access) {
+          if (active) setHasCognitoSession(false);
+          return;
+        }
+
+        if (active) setHasCognitoSession(true);
+
+        // A sessão Cognito pode estar válida mesmo que a API esteja temporariamente
+        // indisponível. Não terminar a sessão automaticamente por erros HTTP/API.
         const response = await fetch(`${API}/auth/me`, {
           headers: { Authorization: `Bearer ${access}` },
         });
         const profile = await readResponse<User>(response);
+
         if (active) {
           setToken(access);
           setUser(profile);
+          setLoginError('');
         }
       } catch (error) {
-        console.error('Cognito session initialization failed:', error);
-        try { await cognitoSignOut(); } catch { /* no active session */ }
+        console.error('Session/profile initialization failed:', error);
+        if (active) {
+          setLoginError(
+            error instanceof Error
+              ? `A sessão Cognito existe ou não pôde ser validada pela API: ${error.message}`
+              : 'Não foi possível validar a sessão. Verifique a API.'
+          );
+        }
       } finally {
         if (active) setBooting(false);
       }
@@ -295,8 +316,24 @@ export default function App() {
   async function signIn(event: FormEvent) {
     event.preventDefault();
     setLoginError('');
+
     try {
-      const result = await cognitoSignIn({ username: email.trim(), password });
+      // Evita chamar Cognito signIn() quando já existe uma sessão ativa.
+      const currentSession = await fetchAuthSession();
+      const currentAccessToken = currentSession.tokens?.accessToken?.toString();
+
+      if (currentAccessToken) {
+        setHasCognitoSession(true);
+        await loadCognitoUser();
+        setPassword('');
+        return;
+      }
+
+      const result = await cognitoSignIn({
+        username: email.trim(),
+        password,
+      });
+
       if (!result.isSignedIn) {
         if (result.nextStep.signInStep === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED') {
           setNeedsNewPassword(true);
@@ -306,6 +343,8 @@ export default function App() {
         setLoginError(`A autenticação exige uma etapa adicional: ${result.nextStep.signInStep}.`);
         return;
       }
+
+      setHasCognitoSession(true);
       await loadCognitoUser();
       setPassword('');
     } catch (error) {
@@ -337,6 +376,7 @@ export default function App() {
     } finally {
       setToken('');
       setUser(null);
+      setHasCognitoSession(false);
       setLeads([]);
       setDash(null);
       setSection('dashboard');
@@ -489,6 +529,24 @@ export default function App() {
             onChange={event => setPassword(event.target.value)} placeholder="A sua palavra-passe" />
           {loginError && <div className="auth-error">{loginError}</div>}
           <button className="auth-submit" type="submit"><LockKeyhole size={16} /> Entrar</button>
+          {hasCognitoSession && (
+            <button
+              className="secondary"
+              type="button"
+              onClick={async () => {
+                try {
+                  await cognitoSignOut();
+                } finally {
+                  setHasCognitoSession(false);
+                  setToken('');
+                  setUser(null);
+                  setLoginError('Sessão terminada. Pode iniciar sessão com outra conta.');
+                }
+              }}
+            >
+              Terminar sessão Cognito e usar outra conta
+            </button>
+          )}
           <small className="auth-note">Acesso individual · Sessão protegida</small>
         </form>
       </div>

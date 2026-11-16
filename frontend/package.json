@@ -9,11 +9,11 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
-    "vite": "latest",
+    "aws-amplify": "^6.22.2",
+    "lucide-react": "^0.468.0",
     "react": "latest",
     "react-dom": "latest",
-    "lucide-react": "^0.468.0",
-    "aws-amplify": "^6.15.0"
+    "vite": "latest"
   },
   "devDependencies": {
     "@types/react": "latest",
