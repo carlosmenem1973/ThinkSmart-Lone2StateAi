@@ -1,25 +1,37 @@
-    try {
-      const [leadsResponse, dashboardResponse] = await Promise.all([
+const load = useCallback(async () => {
+  try {
+    const [leadsResponse, dashboardResponse] =
+      await Promise.all([
         apiFetch('/leads'),
         apiFetch('/dashboard'),
       ]);
 
-      if (!leadsResponse.ok) {
-        throw new Error(`Não foi possível carregar os leads (${leadsResponse.status})`);
-      }
-      if (!dashboardResponse.ok) {
-        throw new Error(`Não foi possível carregar o dashboard (${dashboardResponse.status})`);
-      }
-
-      const leadsData = await leadsResponse.json();
-      const dashboardData = await dashboardResponse.json();
-
-      setLeads(Array.isArray(leadsData) ? leadsData : (leadsData.items ?? []));
-      setDash(dashboardData);
-    } catch (error) {
-      console.error('Dashboard loading failed:', error);
+    if (!leadsResponse.ok) {
+      throw new Error(`Failed to load leads: ${leadsResponse.status}`);
     }
-  }, [token, apiFetch]);
+
+    if (!dashboardResponse.ok) {
+      throw new Error(`Failed to load dashboard: ${dashboardResponse.status}`);
+    }
+
+    const leadsData = await leadsResponse.json();
+    const dashboardData = await dashboardResponse.json();
+
+    setLeads(
+      Array.isArray(leadsData)
+        ? leadsData
+        : (leadsData.items ?? [])
+    );
+
+    setDash(dashboardData);
+  } catch (error) {
+    console.error('Dashboard loading failed:', error);
+  }
+}, [token, apiFetch]);
+
+useEffect(() => {
+  if (token) void load();
+}, [token, load]);
 
   useEffect(() => {
     if (token) void load();
