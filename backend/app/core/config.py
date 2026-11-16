@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-    app_name: str = "ThinkSmart-Lone2StateAi"
+    app_name: str = "ThinkSmart AI"
     environment: str = "development"
     secret_key: str = "CHANGE_ME_TO_A_LONG_RANDOM_SECRET"
     access_token_minutes: int = 15
@@ -12,10 +12,13 @@ class Settings(BaseSettings):
     cookie_secure: bool | None = None
     database_url: str = "postgresql+psycopg://estateai:estateai@db:5432/estateai"
     redis_url: str = "redis://redis:6379/0"
+    aws_region: str = "eu-west-1"
+    cognito_user_pool_id: str = ""
+    cognito_app_client_id: str = ""
+    frontend_origin: str = "http://localhost:5173"
     openai_api_key: str = ""
     openai_model: str = "gpt-6-astra"
     openai_web_search_enabled: bool = True
-    frontend_origin: str = "http://localhost:5173"
     microsoft_tenant_id: str = "common"
     microsoft_client_id: str = ""
     microsoft_client_secret: str = ""

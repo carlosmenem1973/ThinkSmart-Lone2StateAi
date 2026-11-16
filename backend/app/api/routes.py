@@ -1,4 +1,5 @@
 import secrets
+import boto3
 import string
 from datetime import datetime, timedelta, timezone
 
@@ -107,80 +108,19 @@ def health():
     return {"status": "ok", "service": settings.app_name}
 
 
-@router.post("/auth/login")
-def login(payload: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
-    email = str(payload.email).lower().strip()
-    user = db.scalar(select(User).where(func.lower(User.email) == email))
-    now = datetime.now(timezone.utc)
-    if not user:
-        # Run a dummy hash check to reduce email enumeration timing differences.
-        verify_password(payload.password, None)
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-    if user.locked_until and user.locked_until > now:
-        raise HTTPException(status_code=423, detail="Account temporarily locked. Try again later.")
-    if not user.active or not verify_password(payload.password, user.password_hash):
-        user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
-        if user.failed_login_attempts >= 5:
-            user.locked_until = now + timedelta(minutes=15)
-            user.failed_login_attempts = 0
-        db.commit()
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-
-    user.failed_login_attempts = 0
-    user.locked_until = None
-    user.last_login_at = now
-    raw_refresh = create_refresh_session(db, user, request)
-    access_token = create_access_token(user)
-    audit(db, user, "auth.login", "user", str(user.id))
-    db.commit()
-    set_refresh_cookie(response, raw_refresh)
-    return {"access_token": access_token, "token_type": "bearer", "expires_in": settings.access_token_minutes * 60, "user": user_public(user)}
+@router.post("/auth/login", include_in_schema=False)
+def login_deprecated():
+    raise HTTPException(status_code=410, detail="Local password login is disabled. Authenticate directly with Amazon Cognito.")
 
 
-@router.post("/auth/refresh")
-def refresh(request: Request, response: Response, db: Session = Depends(get_db)):
-    verify_same_origin(request)
-    raw = request.cookies.get("estateai_refresh")
-    if not raw:
-        raise HTTPException(status_code=401, detail="Refresh session missing")
-    session = db.scalar(select(RefreshSession).where(RefreshSession.token_hash == hash_refresh_token(raw)))
-    now = datetime.now(timezone.utc)
-    if not session or session.expires_at <= now:
-        clear_refresh_cookie(response)
-        raise HTTPException(status_code=401, detail="Refresh session expired or revoked")
-    if session.revoked_at:
-        # Record replay attempts. Do not revoke every device session here: parallel browser tabs
-        # can race a rotation and otherwise lock out the legitimate user.
-        audit(db, db.get(User, session.user_id), "auth.refresh_reuse_detected", "user", str(session.user_id))
-        db.commit()
-        raise HTTPException(status_code=401, detail="Refresh token already rotated; retry with the current session")
-    user = db.get(User, session.user_id)
-    if not user or not user.active:
-        session.revoked_at = now
-        db.commit()
-        clear_refresh_cookie(response)
-        raise HTTPException(status_code=401, detail="Account is inactive")
-    session.revoked_at = now
-    next_refresh = create_refresh_session(db, user, request)
-    token = create_access_token(user)
-    audit(db, user, "auth.refresh", "user", str(user.id))
-    db.commit()
-    set_refresh_cookie(response, next_refresh)
-    return {"access_token": token, "token_type": "bearer", "expires_in": settings.access_token_minutes * 60, "user": user_public(user)}
+@router.post("/auth/refresh", include_in_schema=False)
+def refresh_deprecated():
+    raise HTTPException(status_code=410, detail="Local refresh cookies are disabled. Use Cognito fetchAuthSession().")
 
 
-@router.post("/auth/logout")
-def logout(request: Request, response: Response, db: Session = Depends(get_db)):
-    verify_same_origin(request)
-    raw = request.cookies.get("estateai_refresh")
-    if raw:
-        session = db.scalar(select(RefreshSession).where(RefreshSession.token_hash == hash_refresh_token(raw)))
-        if session and not session.revoked_at:
-            session.revoked_at = datetime.now(timezone.utc)
-            audit(db, db.get(User, session.user_id), "auth.logout", "user", str(session.user_id))
-            db.commit()
-    clear_refresh_cookie(response)
-    return {"status": "logged_out"}
+@router.post("/auth/logout", include_in_schema=False)
+def logout_deprecated():
+    raise HTTPException(status_code=410, detail="Use Amazon Cognito signOut().")
 
 
 @router.get("/auth/me", response_model=UserOut)
@@ -188,24 +128,9 @@ def me(user: User = Depends(get_current_user)):
     return user
 
 
-@router.post("/auth/change-password")
-def change_password(payload: ChangePasswordRequest, request: Request, response: Response, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    if not verify_password(payload.current_password, user.password_hash):
-        raise HTTPException(status_code=400, detail="Current password is incorrect")
-    if payload.current_password == payload.new_password:
-        raise HTTPException(status_code=400, detail="New password must be different")
-    validate_password_strength(payload.new_password)
-    user.password_hash = hash_password(payload.new_password)
-    user.token_version = (user.token_version or 0) + 1
-    user.must_change_password = False
-    # Revoke every refresh session; require a fresh login on all devices.
-    sessions = db.scalars(select(RefreshSession).where(RefreshSession.user_id == user.id, RefreshSession.revoked_at.is_(None))).all()
-    for session in sessions:
-        session.revoked_at = datetime.now(timezone.utc)
-    audit(db, user, "auth.password_changed", "user", str(user.id))
-    db.commit()
-    clear_refresh_cookie(response)
-    return {"status": "password_changed", "message": "Please sign in again on all devices."}
+@router.post("/auth/change-password", include_in_schema=False)
+def change_password_deprecated():
+    raise HTTPException(status_code=410, detail="Change passwords through Amazon Cognito.")
 
 
 @router.get("/auth/users", response_model=list[UserOut])
@@ -217,35 +142,52 @@ def list_users(_admin: User = Depends(require_admin), db: Session = Depends(get_
 def create_user(payload: CreateUserRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
     email = str(payload.email).lower().strip()
     if db.scalar(select(User).where(func.lower(User.email) == email)):
-        raise HTTPException(status_code=409, detail="An account with this email already exists")
-    temporary_password = payload.temporary_password or generate_temporary_password()
-    validate_password_strength(temporary_password)
+        raise HTTPException(status_code=409, detail="An application account with this email already exists")
+    if not settings.cognito_user_pool_id:
+        raise HTTPException(status_code=503, detail="Cognito User Pool is not configured")
+    try:
+        client = boto3.client("cognito-idp", region_name=settings.aws_region)
+        result = client.admin_create_user(
+            UserPoolId=settings.cognito_user_pool_id,
+            Username=email,
+            UserAttributes=[
+                {"Name": "email", "Value": email},
+                {"Name": "name", "Value": payload.full_name},
+            ],
+            DesiredDeliveryMediums=["EMAIL"],
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Cognito user provisioning failed: {type(exc).__name__}")
+    attributes = {item["Name"]: item["Value"] for item in result.get("User", {}).get("Attributes", [])}
+    cognito_sub = attributes.get("sub")
+    if not cognito_sub:
+        raise HTTPException(status_code=502, detail="Cognito created the user but did not return a subject")
     user = User(
         email=email, full_name=payload.full_name, role=payload.role,
-        territory=payload.territory, active=True,
-        password_hash=hash_password(temporary_password), must_change_password=True,
+        territory=payload.territory, active=True, cognito_sub=cognito_sub,
+        password_hash=None, must_change_password=False,
     )
     db.add(user)
     db.flush()
-    audit(db, admin, "user.created", "user", str(user.id), {"email": email, "role": user.role.value})
+    audit(db, admin, "user.created", "user", str(user.id), {"email": email, "role": user.role.value, "identity_provider": "cognito"})
     db.commit()
-    return {"user": user_public(user), "temporary_password": temporary_password, "warning": "Show this password to the user once using a secure channel. They must change it at first sign-in."}
+    return {"user": user_public(user), "message": "Cognito invitation sent to the user's email address."}
 
 
 @router.post("/auth/users/{user_id}/reset-password")
 def reset_user_password(user_id: int, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
     user = db.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    temporary_password = generate_temporary_password()
-    user.password_hash = hash_password(temporary_password)
-    user.token_version = (user.token_version or 0) + 1
-    user.must_change_password = True
-    for session in db.scalars(select(RefreshSession).where(RefreshSession.user_id == user.id, RefreshSession.revoked_at.is_(None))).all():
-        session.revoked_at = datetime.now(timezone.utc)
-    audit(db, admin, "user.password_reset", "user", str(user.id))
+    if not user or not user.cognito_sub:
+        raise HTTPException(status_code=404, detail="Cognito-linked user not found")
+    try:
+        boto3.client("cognito-idp", region_name=settings.aws_region).admin_reset_user_password(
+            UserPoolId=settings.cognito_user_pool_id, Username=user.email
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Cognito password reset failed: {type(exc).__name__}")
+    audit(db, admin, "user.password_reset", "user", str(user.id), {"identity_provider": "cognito"})
     db.commit()
-    return {"user_id": user.id, "temporary_password": temporary_password, "message": "Deliver once through a secure channel. User must change it at next sign-in."}
+    return {"user_id": user.id, "message": "Cognito password reset initiated. The user will receive the Cognito reset email."}
 
 
 @router.patch("/auth/users/{user_id}/active")
@@ -259,6 +201,13 @@ def set_user_active(user_id: int, active: bool, admin: User = Depends(require_ad
         active_admins = db.scalar(select(func.count()).select_from(User).where(User.role == UserRole.ADMIN, User.active.is_(True))) or 0
         if active_admins <= 1:
             raise HTTPException(status_code=400, detail="At least one active administrator must remain")
+    if user.cognito_sub:
+        try:
+            cognito = boto3.client("cognito-idp", region_name=settings.aws_region)
+            operation = cognito.admin_enable_user if active else cognito.admin_disable_user
+            operation(UserPoolId=settings.cognito_user_pool_id, Username=user.email)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Cognito account update failed: {type(exc).__name__}")
     user.active = active
     user.token_version = (user.token_version or 0) + 1
     if not active:

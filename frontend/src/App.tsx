@@ -1,10 +1,9 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { fetchAuthSession, signIn as cognitoSignIn, confirmSignIn as cognitoConfirmSignIn, signOut as cognitoSignOut, updatePassword } from 'aws-amplify/auth';
 import { Building2, Users, Search, Mail, CalendarClock, ChartNoAxesCombined, RefreshCw, ShieldCheck, LogOut, LockKeyhole, UserPlus, Palette } from 'lucide-react';
 
 const API = import.meta.env.VITE_API_URL || '/api/v1';
-let refreshInFlight: Promise<string | null> | null = null;
 type User = { id: number; email: string; full_name: string; role: 'admin' | 'seller'; territory?: string | null; must_change_password: boolean };
-type AuthResult = { access_token: string; user: User };
 type Branding = { product_name: string; customer_name: string; tagline: string; logo_url: string | null; primary_color: string; accent_color: string };
 
 export default function App() {
@@ -14,6 +13,8 @@ export default function App() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
+  const [needsNewPassword, setNeedsNewPassword] = useState(false);
+  const [challengePassword, setChallengePassword] = useState('');
   const [query, setQuery] = useState('Imóveis anunciados por proprietários particulares em Lisboa e arredores');
   const [leads, setLeads] = useState<any[]>([]);
   const [dash, setDash] = useState<any>(null);
@@ -30,61 +31,96 @@ export default function App() {
   const [brandingMessage, setBrandingMessage] = useState('');
   const [brandingBusy, setBrandingBusy] = useState(false);
 
-  const acceptAuth = (data: AuthResult) => { setToken(data.access_token); setUser(data.user); };
-
-  const refreshSession = useCallback(async (): Promise<string | null> => {
-    if (refreshInFlight) return refreshInFlight;
-    refreshInFlight = (async () => {
-      try {
-        const response = await fetch(`${API}/auth/refresh`, { method: 'POST', credentials: 'include' });
-        if (!response.ok) { setToken(''); setUser(null); return null; }
-        const data = await response.json(); acceptAuth(data); return data.access_token as string;
-      } catch { setToken(''); setUser(null); return null; }
-    })();
-    try { return await refreshInFlight; } finally { refreshInFlight = null; }
+  const loadCognitoUser = useCallback(async () => {
+    const session = await fetchAuthSession();
+    const access = session.tokens?.accessToken?.toString();
+    if (!access) throw new Error('Sessão Cognito não encontrada');
+    setToken(access);
+    const response = await fetch(`${API}/auth/me`, {
+      headers: { Authorization: `Bearer ${access}` },
+    });
+    if (!response.ok) throw new Error('Não foi possível carregar o perfil da aplicação');
+    setUser(await response.json());
   }, []);
 
-  useEffect(() => { refreshSession().finally(() => setBooting(false)); }, [refreshSession]);
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const session = await fetchAuthSession();
+        if (!session.tokens?.accessToken) return;
+        const access = session.tokens.accessToken.toString();
+        const response = await fetch(`${API}/auth/me`, { headers: { Authorization: `Bearer ${access}` } });
+        if (!response.ok) throw new Error('Perfil de utilizador indisponível');
+        const profile = await response.json();
+        if (active) { setToken(access); setUser(profile); }
+      } catch (error) {
+        console.error('Cognito session initialization:', error);
+        try { await cognitoSignOut(); } catch { /* no active session */ }
+      } finally { if (active) setBooting(false); }
+    })();
+    return () => { active = false; };
+  }, []);
+
   useEffect(() => { fetch(`${API}/settings/branding`).then(async r => { if (r.ok) setBranding(await r.json()); }).catch(console.error); }, []);
 
   const apiFetch = useCallback(async (path: string, init: RequestInit = {}) => {
-    const makeRequest = (access: string) => {
+    const makeRequest = async (forceRefresh = false) => {
+      const session = await fetchAuthSession({ forceRefresh });
+      const access = session.tokens?.accessToken?.toString();
+      if (!access) throw new Error('Sessão expirada. Inicie sessão novamente.');
       const headers = new Headers(init.headers);
-      headers.set('Content-Type', 'application/json');
-      if (access) headers.set('Authorization', `Bearer ${access}`);
-      return fetch(`${API}${path}`, { ...init, credentials: 'include', headers });
+      if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+      headers.set('Authorization', `Bearer ${access}`);
+      return fetch(`${API}${path}`, { ...init, headers });
     };
-    let response = await makeRequest(token);
-    if (response.status === 401 && path !== '/auth/refresh') {
-      const refreshedToken = await refreshSession();
-      if (refreshedToken) response = await makeRequest(refreshedToken);
+    let response = await makeRequest(false);
+    if (response.status === 401) response = await makeRequest(true);
+    if (response.status === 401) {
+      await cognitoSignOut(); setToken(''); setUser(null);
     }
     return response;
-  }, [token, refreshSession]);
+  }, []);
 
   async function signIn(event: FormEvent) {
     event.preventDefault(); setLoginError('');
     try {
-      const response = await fetch(`${API}/auth/login`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || 'Não foi possível iniciar sessão');
-      acceptAuth(data);
+      const result = await cognitoSignIn({ username: email.trim(), password });
+      if (!result.isSignedIn) {
+        if (result.nextStep.signInStep === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED') {
+          setNeedsNewPassword(true);
+          setLoginError('Defina uma nova palavra-passe para concluir o primeiro acesso.');
+          return;
+        }
+        setLoginError(`A autenticação exige uma etapa adicional (${result.nextStep.signInStep}). Configure o respetivo desafio Cognito.`);
+        return;
+      }
+      await loadCognitoUser();
       setPassword('');
-    } catch (error: any) { setLoginError(error.message || 'Erro de autenticação'); }
+    } catch (error: any) {
+      setLoginError(error?.message || 'Não foi possível iniciar sessão');
+    }
   }
 
   async function signOut() {
-    await fetch(`${API}/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => undefined);
-    setToken(''); setUser(null); setLeads([]); setDash(null);
+    try { await cognitoSignOut(); } finally { setToken(''); setUser(null); setLeads([]); setDash(null); }
   }
 
-  const load = useCallback(async () => {
-    if (!token) return;
-    const [leadResponse, dashboardResponse] = await Promise.all([apiFetch('/leads'), apiFetch('/dashboard')]);
-    if (leadResponse.ok) setLeads(await leadResponse.json());
-    if (dashboardResponse.ok) setDash(await dashboardResponse.json());
-  }, [token, apiFetch]);
-  useEffect(() => { if (token) load().catch(console.error); }, [token, load]);
+  async function completeFirstLogin(event: FormEvent) {
+    event.preventDefault(); setLoginError('');
+    try {
+      const result = await cognitoConfirmSignIn({ challengeResponse: challengePassword });
+      if (result.isSignedIn) {
+        setNeedsNewPassword(false); setChallengePassword(''); setPassword('');
+        await loadCognitoUser();
+      } else {
+        setLoginError(`Cognito exige outra etapa: ${result.nextStep.signInStep}`);
+      }
+    } catch (error: any) {
+      setLoginError(error?.message || 'Não foi possível concluir o primeiro acesso');
+    }
+  }
+
   useEffect(() => { document.title = `${branding.product_name} | ${branding.customer_name}`; document.documentElement.style.setProperty('--brand-primary', branding.primary_color); document.documentElement.style.setProperty('--brand-accent', branding.accent_color); }, [branding]);
 
   async function research() {
@@ -97,11 +133,13 @@ export default function App() {
 
   async function changePassword(event: FormEvent) {
     event.preventDefault(); setPasswordMessage('');
-    const response = await apiFetch('/auth/change-password', { method: 'POST', body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) });
-    const data = await response.json();
-    if (!response.ok) { setPasswordMessage(data.detail || 'Não foi possível alterar a palavra-passe'); return; }
-    setPasswordMessage('Palavra-passe alterada. Inicie sessão novamente.');
-    setTimeout(signOut, 900);
+    try {
+      await updatePassword({ oldPassword: currentPassword, newPassword });
+      setPasswordMessage('Palavra-passe alterada com sucesso.');
+      setCurrentPassword(''); setNewPassword('');
+    } catch (error: any) {
+      setPasswordMessage(error?.message || 'Não foi possível alterar a palavra-passe');
+    }
   }
 
   async function saveBranding(event: FormEvent) {
@@ -119,11 +157,12 @@ export default function App() {
     const response = await apiFetch('/auth/users', { method: 'POST', body: JSON.stringify({ email: sellerEmail, full_name: sellerName, territory: sellerTerritory || null, role: 'seller' }) });
     const data = await response.json();
     if (!response.ok) { setSellerResult(data.detail || 'Erro ao criar vendedor'); return; }
-    setSellerResult(`Conta criada: ${data.user.email}\nPalavra-passe temporária: ${data.temporary_password}\nEntregue-a por canal seguro. O vendedor terá de a alterar no primeiro acesso.`);
+    setSellerResult(data.message || `Convite Cognito enviado para ${data.user.email}.`);
     setSellerName(''); setSellerEmail(''); setSellerTerritory('');
   }
 
   if (booting) return <div className="auth-page"><div className="auth-card">A validar sessão…</div></div>;
+  if (needsNewPassword) return <div className="auth-page"><form className="auth-card" onSubmit={completeFirstLogin}><div className="auth-brand"><Building2 size={34}/><b>ThinkSmart AI</b></div><h1>Primeiro acesso</h1><p>Defina uma nova palavra-passe para concluir o convite da sua conta.</p><label>Nova palavra-passe</label><input type="password" minLength={12} required autoComplete="new-password" value={challengePassword} onChange={e => setChallengePassword(e.target.value)}/>{loginError && <div className="auth-error">{loginError}</div>}<button className="auth-submit" type="submit">Guardar palavra-passe</button></form></div>;
   if (!user || !token) return <div className="auth-page"><form className="auth-card" onSubmit={signIn}><div className="auth-brand">{branding.logo_url ? <img src={branding.logo_url} alt="Company logo"/> : <Building2 size={34}/>}<div>{branding.product_name}<br/><b>{branding.customer_name}</b></div></div><small className="eyebrow">REAL ESTATE INTELLIGENCE · PORTUGAL</small><h1>Iniciar sessão</h1><p>Aceda ao espaço seguro da sua equipa imobiliária.</p><label>Email profissional</label><input type="email" autoComplete="username" required value={email} onChange={e => setEmail(e.target.value)} placeholder="nome@empresa.pt"/><label>Palavra-passe</label><input type="password" autoComplete="current-password" required value={password} onChange={e => setPassword(e.target.value)} placeholder="A sua palavra-passe"/>{loginError && <div className="auth-error">{loginError}</div>}<button className="auth-submit" type="submit"><LockKeyhole size={16}/> Entrar</button><small className="auth-note">Acesso individual · Registo de auditoria · Sessão protegida</small></form></div>;
 
   if (user.must_change_password) return <div className="auth-page"><form className="auth-card" onSubmit={changePassword}><div className="auth-brand"><LockKeyhole size={32}/><b>Alterar palavra-passe</b></div><h1>Primeiro acesso</h1><p>Por segurança, defina uma palavra-passe nova antes de continuar. Use pelo menos 12 caracteres.</p><label>Palavra-passe temporária / atual</label><input type="password" required value={currentPassword} onChange={e => setCurrentPassword(e.target.value)}/><label>Nova palavra-passe</label><input type="password" minLength={12} required value={newPassword} onChange={e => setNewPassword(e.target.value)}/>{passwordMessage && <div className="auth-error">{passwordMessage}</div>}<button className="auth-submit" type="submit">Guardar nova palavra-passe</button></form></div>;
