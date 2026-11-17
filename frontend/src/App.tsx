@@ -3,6 +3,8 @@ import {
   fetchAuthSession,
   signIn as cognitoSignIn,
   confirmSignIn as cognitoConfirmSignIn,
+  resetPassword as cognitoResetPassword,
+  confirmResetPassword as cognitoConfirmResetPassword,
   signOut as cognitoSignOut,
   updatePassword,
 } from 'aws-amplify/auth';
@@ -140,6 +142,10 @@ export default function App() {
   const [loginError, setLoginError] = useState('');
   const [needsNewPassword, setNeedsNewPassword] = useState(false);
   const [challengePassword, setChallengePassword] = useState('');
+  const [resetMode, setResetMode] = useState(false);
+  const [resetCode, setResetCode] = useState('');
+  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [authBusy, setAuthBusy] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [passwordMessage, setPasswordMessage] = useState('');
@@ -316,6 +322,7 @@ export default function App() {
   async function signIn(event: FormEvent) {
     event.preventDefault();
     setLoginError('');
+    setAuthBusy(true);
 
     try {
       // Evita chamar Cognito signIn() quando já existe uma sessão ativa.
@@ -349,12 +356,15 @@ export default function App() {
       setPassword('');
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : 'Não foi possível iniciar sessão.');
+    } finally {
+      setAuthBusy(false);
     }
   }
 
   async function completeFirstLogin(event: FormEvent) {
     event.preventDefault();
     setLoginError('');
+    setAuthBusy(true);
     try {
       const result = await cognitoConfirmSignIn({ challengeResponse: challengePassword });
       if (!result.isSignedIn) {
@@ -367,6 +377,54 @@ export default function App() {
       await loadCognitoUser();
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : 'Não foi possível concluir o primeiro acesso.');
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function startPasswordReset() {
+    setLoginError('');
+    if (!email.trim()) {
+      setLoginError('Introduza primeiro o seu email profissional.');
+      return;
+    }
+    setAuthBusy(true);
+    try {
+      const result = await cognitoResetPassword({ username: email.trim() });
+      if (result.nextStep.resetPasswordStep === 'CONFIRM_RESET_PASSWORD_WITH_CODE') {
+        setResetMode(true);
+        setResetCode('');
+        setResetNewPassword('');
+        setLoginError('Enviámos um código de recuperação para o email associado à conta.');
+      } else {
+        setLoginError('O Cognito concluiu o processo de recuperação. Tente iniciar sessão.');
+      }
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : 'Não foi possível iniciar a recuperação da palavra-passe.');
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function finishPasswordReset(event: FormEvent) {
+    event.preventDefault();
+    setLoginError('');
+    setAuthBusy(true);
+    try {
+      await cognitoConfirmResetPassword({
+        username: email.trim(),
+        confirmationCode: resetCode.trim(),
+        newPassword: resetNewPassword,
+      });
+      setResetMode(false);
+      setResetCode('');
+      setResetNewPassword('');
+      setPassword('');
+      setLoginError('Palavra-passe redefinida. Já pode iniciar sessão com a nova palavra-passe.');
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : 'Não foi possível confirmar a recuperação da palavra-passe.');
+    } finally {
+      setAuthBusy(false);
     }
   }
 
@@ -504,7 +562,36 @@ export default function App() {
           <input type="password" minLength={12} required autoComplete="new-password"
             value={challengePassword} onChange={event => setChallengePassword(event.target.value)} />
           {loginError && <div className="auth-error">{loginError}</div>}
-          <button className="auth-submit" type="submit">Guardar palavra-passe</button>
+          <button className="auth-submit" type="submit" disabled={authBusy}>
+            {authBusy ? 'A guardar…' : 'Guardar palavra-passe'}
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  if (resetMode) {
+    return (
+      <div className="auth-page">
+        <form className="auth-card" onSubmit={finishPasswordReset}>
+          <div className="auth-brand"><Building2 size={34} /><b>ThinkSmart AI</b></div>
+          <h1>Recuperar palavra-passe</h1>
+          <p>Introduza o código enviado para o seu email e escolha uma nova palavra-passe.</p>
+          <label>Email profissional</label>
+          <input type="email" value={email} readOnly />
+          <label>Código de verificação</label>
+          <input value={resetCode} onChange={event => setResetCode(event.target.value)}
+            autoComplete="one-time-code" required />
+          <label>Nova palavra-passe</label>
+          <input type="password" minLength={12} required autoComplete="new-password"
+            value={resetNewPassword} onChange={event => setResetNewPassword(event.target.value)} />
+          {loginError && <div className="auth-error">{loginError}</div>}
+          <button className="auth-submit" type="submit" disabled={authBusy}>
+            {authBusy ? 'A confirmar…' : 'Redefinir palavra-passe'}
+          </button>
+          <button className="secondary" type="button" onClick={() => { setResetMode(false); setLoginError(''); }}>
+            Voltar ao login
+          </button>
         </form>
       </div>
     );
@@ -528,7 +615,12 @@ export default function App() {
           <input type="password" autoComplete="current-password" required value={password}
             onChange={event => setPassword(event.target.value)} placeholder="A sua palavra-passe" />
           {loginError && <div className="auth-error">{loginError}</div>}
-          <button className="auth-submit" type="submit"><LockKeyhole size={16} /> Entrar</button>
+          <button className="auth-submit" type="submit" disabled={authBusy}>
+            {authBusy ? <><LoaderCircle className="spin" size={16} /> A autenticar…</> : <><LockKeyhole size={16} /> Entrar</>}
+          </button>
+          <button className="secondary" type="button" disabled={authBusy} onClick={() => void startPasswordReset()}>
+            Esqueci-me da palavra-passe
+          </button>
           {hasCognitoSession && (
             <button
               className="secondary"
