@@ -1,0 +1,14 @@
+{
+    "containerOverrides":  [
+                               {
+                                   "command":  [
+                                                   "python",
+                                                   "-m",
+                                                   "alembic",
+                                                   "upgrade",
+                                                   "head"
+                                               ],
+                                   "name":  "thinksmart-api"
+                               }
+                           ]
+}

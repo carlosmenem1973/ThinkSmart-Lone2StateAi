@@ -1,0 +1,12 @@
+{
+    "containerOverrides":  [
+                               {
+                                   "command":  [
+                                                   "python",
+                                                   "-c",
+                                                   "from sqlalchemy import create_engine, text\nimport os\n\nengine = create_engine(os.environ[\"DATABASE_URL\"])\n\nwith engine.connect() as conn:\n    print(\"DATABASE:\", conn.execute(text(\"SELECT current_database()\")).scalar())\n    print(\"ALEMBIC VERSION TABLE:\", conn.execute(text(\"SELECT to_regclass(\u0027public.alembic_version\u0027)\")).scalar())\n\n    for table in [\"users\", \"brand_settings\", \"refresh_sessions\"]:\n        exists = conn.execute(\n            text(\"SELECT to_regclass(:name)\"),\n            {\"name\": \"public.\" + table}\n        ).scalar()\n        print(\"TABLE\", table, \"=\", exists)\n\n    if conn.execute(text(\"SELECT to_regclass(\u0027public.alembic_version\u0027)\")).scalar():\n        versions = conn.execute(text(\"SELECT version_num FROM alembic_version\")).fetchall()\n        print(\"APPLIED MIGRATIONS:\", [row[0] for row in versions])\n\n    if conn.execute(text(\"SELECT to_regclass(\u0027public.users\u0027)\")).scalar():\n        columns = conn.execute(text(\"\"\"\n            SELECT column_name\n            FROM information_schema.columns\n            WHERE table_schema = \u0027public\u0027\n              AND table_name = \u0027users\u0027\n            ORDER BY ordinal_position\n        \"\"\")).fetchall()\n        print(\"USERS COLUMNS:\", [row[0] for row in columns])"
+                                               ],
+                                   "name":  "thinksmart-api"
+                               }
+                           ]
+}

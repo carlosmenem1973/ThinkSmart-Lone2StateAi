@@ -1,0 +1,12 @@
+{
+    "containerOverrides":  [
+                               {
+                                   "command":  [
+                                                   "python",
+                                                   "-c",
+                                                   "from sqlalchemy import create_engine, text\nimport os\n\nengine = create_engine(os.environ[\"DATABASE_URL\"])\n\nwith engine.connect() as conn:\n    for table in [\"alembic_version\", \"users\", \"brand_settings\", \"refresh_sessions\"]:\n        result = conn.execute(\n            text(\"SELECT to_regclass(:name)\"),\n            {\"name\": \"public.\" + table}\n        ).scalar()\n        print(f\"{table}: {result}\")\n\n    if conn.execute(text(\"SELECT to_regclass(\u0027public.alembic_version\u0027)\")).scalar():\n        print(\"VERSIONS:\", conn.execute(\n            text(\"SELECT version_num FROM alembic_version\")\n        ).fetchall())\n\n    if conn.execute(text(\"SELECT to_regclass(\u0027public.brand_settings\u0027)\")).scalar():\n        rows = conn.execute(text(\"\"\"\n            SELECT column_name, is_nullable, column_default\n            FROM information_schema.columns\n            WHERE table_schema = \u0027public\u0027\n              AND table_name = \u0027brand_settings\u0027\n            ORDER BY ordinal_position\n        \"\"\")).fetchall()\n\n        for row in rows:\n            print(\"COLUMN:\", row)"
+                                               ],
+                                   "name":  "thinksmart-api"
+                               }
+                           ]
+}

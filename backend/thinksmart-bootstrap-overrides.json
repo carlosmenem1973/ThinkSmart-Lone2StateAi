@@ -1,0 +1,13 @@
+{
+    "containerOverrides":  [
+                               {
+                                   "command":  [
+                                                   "python",
+                                                   "-m",
+                                                   "scripts.bootstrap_cognito_users",
+                                                   "--apply"
+                                               ],
+                                   "name":  "thinksmart-api"
+                               }
+                           ]
+}

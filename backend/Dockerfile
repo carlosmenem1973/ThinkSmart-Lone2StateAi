@@ -22,6 +22,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY --chown=estateai:estateai app ./app
 COPY --chown=estateai:estateai migrations ./migrations
+COPY --chown=estateai:estateai scripts ./scripts
 COPY --chown=estateai:estateai alembic.ini ./alembic.ini
 
 USER 10001:10001

@@ -1,0 +1,13 @@
+{
+    "Version":  "2012-10-17",
+    "Statement":  [
+                      {
+                          "Effect":  "Allow",
+                          "Sid":  "ListThinkSmartCognitoUsers",
+                          "Resource":  "arn:aws:cognito-idp:eu-west-1:049451987829:userpool/eu-west-1_BZKyKZ2Uk",
+                          "Action":  [
+                                         "cognito-idp:ListUsers"
+                                     ]
+                      }
+                  ]
+}
