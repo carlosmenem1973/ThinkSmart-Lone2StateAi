@@ -7,7 +7,12 @@ from app.core.database import Base
 def utcnow(): return datetime.now(timezone.utc)
 
 class LeadStatus(str, enum.Enum): NEW="new"; REVIEW="review"; QUALIFIED="qualified"; CONTACTED="contacted"; REPLIED="replied"; LISTED="listed"; LOST="lost"; SUPPRESSED="suppressed"
-class UserRole(str, enum.Enum): ADMIN="admin"; SELLER="seller"
+class UserRole(str, enum.Enum):
+    SUPER_ADMIN="super_admin"
+    ADMIN="admin"
+    MANAGER="manager"
+    SELLER="seller"
+    VIEWER="viewer"
 class DraftStatus(str, enum.Enum): PENDING="pending"; APPROVED="approved"; REJECTED="rejected"; SENT="sent"
 
 class User(Base):

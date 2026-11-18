@@ -20,3 +20,6 @@ crash.*.log
 # Local secrets and build artifacts
 .env.*
 !.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example

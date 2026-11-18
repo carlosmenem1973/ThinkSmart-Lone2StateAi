@@ -8,9 +8,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.auth import (
-    clear_refresh_cookie, create_access_token, get_current_user, hash_password,
-    hash_refresh_token, require_admin, require_lead_access, set_refresh_cookie,
-    verify_password, verify_same_origin,
+    clear_refresh_cookie, create_access_token, get_current_user, get_business_user,
+    hash_password, hash_refresh_token, require_admin_user, require_lead_access,
+    set_refresh_cookie, verify_password, verify_same_origin,
 )
 from app.core.config import settings
 from app.core.database import get_db
@@ -67,6 +67,12 @@ def audit(db: Session, actor: User | None, action: str, entity_type: str, entity
 
 
 
+
+
+def require_write_access(user: User) -> None:
+    if user.role == UserRole.VIEWER:
+        raise HTTPException(status_code=403, detail="Viewer accounts have read-only access")
+
 def branding_public(settings_row: BrandSettings | None) -> dict:
     if settings_row is None:
         return {
@@ -89,7 +95,7 @@ def get_branding(db: Session = Depends(get_db)):
 
 
 @router.put("/settings/branding")
-def update_branding(payload: BrandingUpdate, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+def update_branding(payload: BrandingUpdate, user: User = Depends(require_admin_user), db: Session = Depends(get_db)):
     row = db.get(BrandSettings, 1)
     if row is None:
         row = BrandSettings(id=1)
@@ -123,9 +129,20 @@ def logout_deprecated():
     raise HTTPException(status_code=410, detail="Use Amazon Cognito signOut().")
 
 
-@router.get("/auth/me", response_model=UserOut)
-def me(user: User = Depends(get_current_user)):
-    return user
+@router.get("/auth/me")
+def me(principal = Depends(get_current_user)):
+    # This endpoint is deliberately independent of PostgreSQL.
+    return {
+        "id": principal.sub,
+        "sub": principal.sub,
+        "email": principal.email,
+        "full_name": principal.name,
+        "role": principal.role.value,
+        "groups": sorted(principal.groups),
+        "active": True,
+        "must_change_password": False,
+        "territory": None,
+    }
 
 
 @router.post("/auth/change-password", include_in_schema=False)
@@ -134,12 +151,12 @@ def change_password_deprecated():
 
 
 @router.get("/auth/users", response_model=list[UserOut])
-def list_users(_admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+def list_users(_admin: User = Depends(require_admin_user), db: Session = Depends(get_db)):
     return db.scalars(select(User).order_by(User.role, User.full_name)).all()
 
 
 @router.post("/auth/users", status_code=201)
-def create_user(payload: CreateUserRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+def create_user(payload: CreateUserRequest, admin: User = Depends(require_admin_user), db: Session = Depends(get_db)):
     email = str(payload.email).lower().strip()
     if db.scalar(select(User).where(func.lower(User.email) == email)):
         raise HTTPException(status_code=409, detail="An application account with this email already exists")
@@ -162,6 +179,27 @@ def create_user(payload: CreateUserRequest, admin: User = Depends(require_admin)
     cognito_sub = attributes.get("sub")
     if not cognito_sub:
         raise HTTPException(status_code=502, detail="Cognito created the user but did not return a subject")
+    cognito_group = {
+        UserRole.SUPER_ADMIN: "SUPER_ADMIN",
+        UserRole.ADMIN: "ADMIN",
+        UserRole.MANAGER: "MANAGER",
+        UserRole.SELLER: "SELLER",
+        UserRole.VIEWER: "VIEWER",
+    }[payload.role]
+    try:
+        client.admin_add_user_to_group(
+            UserPoolId=settings.cognito_user_pool_id,
+            Username=email,
+            GroupName=cognito_group,
+        )
+    except Exception as exc:
+        # Avoid persisting an app profile when Cognito group assignment failed.
+        try:
+            client.admin_delete_user(UserPoolId=settings.cognito_user_pool_id, Username=email)
+        except Exception:
+            pass
+        raise HTTPException(status_code=502, detail=f"Cognito group assignment failed: {type(exc).__name__}")
+
     user = User(
         email=email, full_name=payload.full_name, role=payload.role,
         territory=payload.territory, active=True, cognito_sub=cognito_sub,
@@ -175,7 +213,7 @@ def create_user(payload: CreateUserRequest, admin: User = Depends(require_admin)
 
 
 @router.post("/auth/users/{user_id}/reset-password")
-def reset_user_password(user_id: int, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+def reset_user_password(user_id: int, admin: User = Depends(require_admin_user), db: Session = Depends(get_db)):
     user = db.get(User, user_id)
     if not user or not user.cognito_sub:
         raise HTTPException(status_code=404, detail="Cognito-linked user not found")
@@ -191,14 +229,14 @@ def reset_user_password(user_id: int, admin: User = Depends(require_admin), db: 
 
 
 @router.patch("/auth/users/{user_id}/active")
-def set_user_active(user_id: int, active: bool, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+def set_user_active(user_id: int, active: bool, admin: User = Depends(require_admin_user), db: Session = Depends(get_db)):
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     if user.id == admin.id and not active:
         raise HTTPException(status_code=400, detail="You cannot deactivate your own administrator account")
-    if user.role == UserRole.ADMIN and not active:
-        active_admins = db.scalar(select(func.count()).select_from(User).where(User.role == UserRole.ADMIN, User.active.is_(True))) or 0
+    if user.role in {UserRole.SUPER_ADMIN, UserRole.ADMIN} and not active:
+        active_admins = db.scalar(select(func.count()).select_from(User).where(User.role.in_([UserRole.SUPER_ADMIN, UserRole.ADMIN]), User.active.is_(True))) or 0
         if active_admins <= 1:
             raise HTTPException(status_code=400, detail="At least one active administrator must remain")
     if user.cognito_sub:
@@ -219,10 +257,10 @@ def set_user_active(user_id: int, active: bool, admin: User = Depends(require_ad
 
 
 @router.get("/dashboard")
-def dashboard(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    lead_filter = [] if user.role == UserRole.ADMIN else [Lead.assigned_to == user.id]
-    followup_filter = [] if user.role == UserRole.ADMIN else [FollowUp.seller_id == user.id]
-    draft_filter = [] if user.role == UserRole.ADMIN else [OutreachDraft.created_by == user.id]
+def dashboard(user: User = Depends(get_business_user), db: Session = Depends(get_db)):
+    lead_filter = [] if user.role in {UserRole.SUPER_ADMIN, UserRole.ADMIN} else [Lead.assigned_to == user.id]
+    followup_filter = [] if user.role in {UserRole.SUPER_ADMIN, UserRole.ADMIN} else [FollowUp.seller_id == user.id]
+    draft_filter = [] if user.role in {UserRole.SUPER_ADMIN, UserRole.ADMIN} else [OutreachDraft.created_by == user.id]
     counts = {s.value: db.scalar(select(func.count()).select_from(Lead).where(Lead.status == s, *lead_filter)) or 0 for s in LeadStatus}
     return {
         "total_leads": sum(counts.values()), "by_status": counts,
@@ -233,15 +271,15 @@ def dashboard(user: User = Depends(get_current_user), db: Session = Depends(get_
 
 
 @router.get("/sellers")
-def list_sellers(_admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+def list_sellers(_admin: User = Depends(require_admin_user), db: Session = Depends(get_db)):
     sellers = db.scalars(select(User).where(User.role == UserRole.SELLER, User.active.is_(True)).order_by(User.full_name)).all()
     return [{"id": u.id, "email": u.email, "full_name": u.full_name, "territory": u.territory} for u in sellers]
 
 
 @router.get("/leads", response_model=list[LeadOut])
-def list_leads(status: LeadStatus | None = None, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def list_leads(status: LeadStatus | None = None, user: User = Depends(get_business_user), db: Session = Depends(get_db)):
     q = select(Lead).order_by(Lead.created_at.desc()).limit(250)
-    if user.role != UserRole.ADMIN:
+    if user.role not in {UserRole.SUPER_ADMIN, UserRole.ADMIN}:
         q = q.where(Lead.assigned_to == user.id)
     if status:
         q = q.where(Lead.status == status)
@@ -249,11 +287,12 @@ def list_leads(status: LeadStatus | None = None, user: User = Depends(get_curren
 
 
 @router.post("/leads", response_model=LeadOut)
-def create_lead(payload: LeadCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def create_lead(payload: LeadCreate, user: User = Depends(get_business_user), db: Session = Depends(get_db)):
+    require_write_access(user)
     if payload.source_url and db.scalar(select(Lead).where(Lead.source_url == payload.source_url)):
         raise HTTPException(status_code=409, detail="Source URL already exists")
     values = payload.model_dump()
-    if user.role != UserRole.ADMIN:
+    if user.role not in {UserRole.SUPER_ADMIN, UserRole.ADMIN}:
         values["assigned_to"] = user.id
         values["outreach_allowed"] = False
         values["lawful_basis"] = None
@@ -271,13 +310,14 @@ def create_lead(payload: LeadCreate, user: User = Depends(get_current_user), db:
 
 
 @router.patch("/leads/{lead_id}", response_model=LeadOut)
-def update_lead(lead_id: int, payload: LeadUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def update_lead(lead_id: int, payload: LeadUpdate, user: User = Depends(get_business_user), db: Session = Depends(get_db)):
+    require_write_access(user)
     lead = db.get(Lead, lead_id)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     require_lead_access(user, lead)
     changes = payload.model_dump(exclude_unset=True)
-    if user.role != UserRole.ADMIN and ({"assigned_to", "outreach_allowed", "lawful_basis"} & changes.keys()):
+    if user.role not in {UserRole.SUPER_ADMIN, UserRole.ADMIN} and ({"assigned_to", "outreach_allowed", "lawful_basis"} & changes.keys()):
         raise HTTPException(status_code=403, detail="Only administrators can reassign leads or change outreach authorisation")
     for key, value in changes.items():
         setattr(lead, key, value)
@@ -288,7 +328,8 @@ def update_lead(lead_id: int, payload: LeadUpdate, user: User = Depends(get_curr
 
 
 @router.post("/research")
-def run_research(query: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def run_research(query: str, user: User = Depends(get_business_user), db: Session = Depends(get_db)):
+    require_write_access(user)
     try:
         result = research_web(query)
     except Exception as exc:
@@ -299,7 +340,8 @@ def run_research(query: str, user: User = Depends(get_current_user), db: Session
 
 
 @router.post("/leads/{lead_id}/draft")
-def create_draft(lead_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def create_draft(lead_id: int, user: User = Depends(get_business_user), db: Session = Depends(get_db)):
+    require_write_access(user)
     lead = db.get(Lead, lead_id)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -319,7 +361,8 @@ def create_draft(lead_id: int, user: User = Depends(get_current_user), db: Sessi
 
 
 @router.post("/drafts/{draft_id}/approve")
-def approve_draft(draft_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def approve_draft(draft_id: int, user: User = Depends(get_business_user), db: Session = Depends(get_db)):
+    require_write_access(user)
     draft = db.get(OutreachDraft, draft_id)
     if not draft:
         raise HTTPException(status_code=404, detail="Draft not found")
@@ -327,7 +370,7 @@ def approve_draft(draft_id: int, user: User = Depends(get_current_user), db: Ses
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     require_lead_access(user, lead)
-    if user.role != UserRole.ADMIN and draft.created_by != user.id:
+    if user.role not in {UserRole.SUPER_ADMIN, UserRole.ADMIN} and draft.created_by != user.id:
         raise HTTPException(status_code=404, detail="Draft not found")
     if not lead.outreach_allowed or not lead.lawful_basis:
         raise HTTPException(status_code=403, detail="Cannot approve: documented outreach permission/lawful basis is missing")
@@ -339,12 +382,13 @@ def approve_draft(draft_id: int, user: User = Depends(get_current_user), db: Ses
 
 
 @router.post("/leads/{lead_id}/followups")
-def create_followup(lead_id: int, payload: FollowUpCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def create_followup(lead_id: int, payload: FollowUpCreate, user: User = Depends(get_business_user), db: Session = Depends(get_db)):
+    require_write_access(user)
     lead = db.get(Lead, lead_id)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     require_lead_access(user, lead)
-    seller_id = user.id if user.role != UserRole.ADMIN else payload.seller_id
+    seller_id = user.id if user.role not in {UserRole.SUPER_ADMIN, UserRole.ADMIN} else payload.seller_id
     seller = db.get(User, seller_id)
     if not seller or not seller.active or seller.role != UserRole.SELLER:
         raise HTTPException(status_code=400, detail="Follow-up must be assigned to an active seller")
@@ -357,14 +401,14 @@ def create_followup(lead_id: int, payload: FollowUpCreate, user: User = Depends(
 
 
 @router.get("/followups")
-def list_followups(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def list_followups(user: User = Depends(get_business_user), db: Session = Depends(get_db)):
     q = select(FollowUp).where(FollowUp.completed.is_(False)).order_by(FollowUp.due_at)
-    if user.role != UserRole.ADMIN:
+    if user.role not in {UserRole.SUPER_ADMIN, UserRole.ADMIN}:
         q = q.where(FollowUp.seller_id == user.id)
     rows = db.scalars(q).all()
     return [{"id": x.id, "lead_id": x.lead_id, "seller_id": x.seller_id, "due_at": x.due_at, "note": x.note} for x in rows]
 
 
 @router.get("/integrations/microsoft/status")
-def microsoft_status(_user: User = Depends(get_current_user)):
+def microsoft_status(_user: User = Depends(get_business_user)):
     return {"configured": bool(settings.microsoft_client_id and settings.microsoft_client_secret), "mailbox_sync_enabled": False, "message": "Per-seller Entra OAuth state binding and encrypted token-cache persistence must be configured before mailbox synchronisation."}

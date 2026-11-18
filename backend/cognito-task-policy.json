@@ -1,0 +1,15 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ThinkSmartCognitoUserManagement",
+      "Effect": "Allow",
+      "Action": [
+        "cognito-idp:ListUsers",
+        "cognito-idp:AdminGetUser",
+        "cognito-idp:AdminAddUserToGroup"
+      ],
+      "Resource": "arn:aws:cognito-idp:eu-west-1:049451987829:userpool/eu-west-1_BZKyKZ2Uk"
+    }
+  ]
+}
