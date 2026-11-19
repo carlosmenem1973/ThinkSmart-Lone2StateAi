@@ -108,8 +108,8 @@ const AGENTS: Agent[] = [
   },
   {
     id: 'owner-intelligence',
-    name: 'Agente de Proprietários',
-    description: 'Estrutura informação pública e validada sobre anúncios e contactos.',
+    name: 'Agente de Informação Pública',
+    description: 'Estrutura informação pública fornecida sobre anúncios, sem inferir a identidade de proprietários.',
     purpose: 'Informação de proprietários',
     icon: UserSearch,
   },
@@ -141,11 +141,18 @@ const DEFAULT_BRANDING: Branding = {
 async function readResponse<T>(response: Response): Promise<T> {
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('application/json')) {
+    if (response.status === 404) {
+      throw new Error(`A API respondeu 404. URL base utilizada: ${API}. Confirme se o backend foi atualizado e se VITE_API_URL aponta para a API, não para o alojamento estático.`);
+    }
     throw new Error(`Resposta inesperada do servidor (${response.status}). Confirme VITE_API_URL e o backend.`);
   }
   const payload = await response.json();
   if (!response.ok) {
-    throw new Error(payload?.detail || payload?.message || `Erro HTTP ${response.status}`);
+    const detail = payload?.detail || payload?.message;
+    if (response.status === 404 && (!detail || detail === 'Not Found')) {
+      throw new Error(`A rota não existe na versão da API em execução (${API}). O backend precisa de ser publicado com as rotas de Procura IA e Agentes IA.`);
+    }
+    throw new Error(detail || `Erro HTTP ${response.status}`);
   }
   return payload as T;
 }
@@ -790,7 +797,7 @@ export default function App() {
             <form className="searchrow" onSubmit={runSearch}>
               <input value={query} onChange={event => setQuery(event.target.value)}
                 placeholder="Ex.: apartamentos T2 em Lisboa até 350.000 €" />
-              <button disabled={searchBusy || !query.trim()} type="submit">
+              <button disabled={searchBusy || !query.trim() || (searchMode === 'web' && aiStatus !== null && !aiStatus.web_search_enabled)} type="submit">
                 {searchBusy ? <><LoaderCircle className="spin" size={16} /> A pesquisar…</> : <><Search size={16} /> Procurar</>}
               </button>
             </form>
@@ -835,7 +842,7 @@ export default function App() {
                       <h3>{agent.name}</h3>
                       <p>{agent.description}</p>
                       <small>{agent.purpose}</small>
-                      <button disabled={!!agentBusy} onClick={() => void runAgent(agent)}>
+                      <button disabled={!!agentBusy || (aiStatus !== null && !aiStatus.agents_enabled)} onClick={() => void runAgent(agent)}>
                         {running ? <><LoaderCircle className="spin" size={15} /> A executar…</> : <><Play size={15} /> Executar agente</>}
                       </button>
                       {agentResults[agent.id] && <pre className="report agent-result">{agentResults[agent.id]}</pre>}
