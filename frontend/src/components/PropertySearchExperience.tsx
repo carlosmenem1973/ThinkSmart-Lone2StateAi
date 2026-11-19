@@ -3,6 +3,7 @@ import { MapContainer, Marker, Popup, TileLayer } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Search, LoaderCircle, Images, MapPin, ExternalLink, Sparkles, Scale, LayoutGrid, Map as MapIcon, AlertCircle } from 'lucide-react';
+import './PropertySearchExperience.css';
 
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
 type Property = {
