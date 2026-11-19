@@ -60,16 +60,26 @@ def run_scheduled_property_discovery():
     db = SessionLocal()
     try:
         now = datetime.now(timezone.utc)
-        config = db.get(ContactAISettings, 1)
-        if not config or not config.search_enabled:
+        # Serialize schedulers across worker replicas. The row lock and schedule
+        # advance are committed together before the external Bedrock request.
+        # A second worker will then observe next_search_at in the future.
+        config = db.scalar(
+            select(ContactAISettings)
+            .where(ContactAISettings.id == 1)
+            .with_for_update(skip_locked=True)
+        )
+        if not config:
+            return {"status": "disabled_or_locked"}
+        if not config.search_enabled:
             return {"status": "disabled"}
         if config.next_search_at and config.next_search_at > now:
             return {"status": "not_due"}
         query = (config.search_query or "").strip()
         if not query:
             return {"status": "invalid_query"}
+        interval = max(60, min(config.search_interval_minutes, 10080))
         config.last_search_at = now
-        config.next_search_at = now + timedelta(minutes=max(60, min(config.search_interval_minutes, 10080)))
+        config.next_search_at = now + timedelta(minutes=interval)
         db.commit()
         result = research_web(query)
         db.add(AuditLog(action="property_discovery.automatic_completed", entity_type="property_search",
