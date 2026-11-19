@@ -28,6 +28,8 @@ docker compose up -d --build
 docker compose ps
 docker compose logs -f api
 ```
+For local AI execution in Docker Compose, the API and worker containers need AWS SDK credentials. Put temporary AWS credentials in the local `.env` file (the example includes blank `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and optional `AWS_SESSION_TOKEN` entries), or mount an AWS IAM Identity Center profile into the containers. Use an IAM identity with the same scoped Bedrock/AgentCore permissions as the ECS task role. Never commit real credentials.
+
 Open `http://localhost` for the local Docker Compose dashboard. Local API docs: `http://localhost/api/v1/docs`. The API is also bound to `127.0.0.1:8000` for local testing. In AWS production, API documentation is disabled by default.
 
 Sign in using `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`. The access token stays in browser memory; the rotating refresh token is held in a Secure/HttpOnly/SameSite cookie in production. Do not put access or refresh tokens in localStorage.
