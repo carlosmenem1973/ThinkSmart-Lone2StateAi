@@ -13,7 +13,7 @@ import {
   Building2, Users, Search, Mail, CalendarClock, ChartNoAxesCombined,
   RefreshCw, ShieldCheck, LogOut, LockKeyhole, UserPlus, Palette,
   Bot, Globe2, Database, Play, CheckCircle2, LoaderCircle, MapPin, MessageCircle,
-  TrendingUp, UserSearch, ClipboardCheck, Menu, X,
+  TrendingUp, UserSearch, ClipboardCheck, Menu, X, Mic,
 } from 'lucide-react';
 
 function normaliseApiBase(configured?: string): string {
@@ -155,6 +155,25 @@ async function readResponse<T>(response: Response): Promise<T> {
     throw new Error(detail || `Erro HTTP ${response.status}`);
   }
   return payload as T;
+}
+
+function startDictation(onText: (text: string) => void) {
+  const browser = window as unknown as { SpeechRecognition?: new () => any; webkitSpeechRecognition?: new () => any };
+  const SpeechRecognitionCtor = browser.SpeechRecognition || browser.webkitSpeechRecognition;
+  if (!SpeechRecognitionCtor) {
+    window.alert('O reconhecimento de voz não é suportado neste navegador. Pode escrever o pedido.');
+    return;
+  }
+  const recognition = new SpeechRecognitionCtor();
+  recognition.lang = 'pt-PT';
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+  recognition.onresult = (event: any) => {
+    const transcript = event.results?.[0]?.[0]?.transcript;
+    if (typeof transcript === 'string' && transcript.trim()) onText(transcript.trim());
+  };
+  recognition.onerror = () => window.alert('Não foi possível reconhecer a voz. Tente novamente ou escreva o pedido.');
+  recognition.start();
 }
 
 export default function App() {
