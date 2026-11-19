@@ -18,7 +18,10 @@ export default function ContactAIPanel({ apiFetch, role }: Props) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [message, setMessage] = useState('');\n  const [discovery, setDiscovery] = useState<Discovery>({ enabled: false, query: 'Oportunidades imobiliárias publicadas recentemente em Portugal', interval_minutes: 1440 });\n  const [runs, setRuns] = useState<DiscoveryRun[]>([]);\n  const [discoveryBusy, setDiscoveryBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const [discovery, setDiscovery] = useState<Discovery>({ enabled: false, query: 'Oportunidades imobiliárias publicadas recentemente em Portugal', interval_minutes: 1440 });
+  const [runs, setRuns] = useState<DiscoveryRun[]>([]);
+  const [discoveryBusy, setDiscoveryBusy] = useState(false);
 
   const load = useCallback(async () => {
     setError('');
@@ -28,7 +31,10 @@ export default function ContactAIPanel({ apiFetch, role }: Props) {
         apiFetch('/contact-ai/conversations'),
       ]);
       setSettings(await payload<Settings>(s));
-      setConversations(await payload<Conversation[]>(c));\n      const [d, r] = await Promise.all([apiFetch('/contact-ai/discovery-settings'), apiFetch('/contact-ai/discovery/runs')]);\n      setDiscovery(await payload<Discovery>(d));\n      setRuns(await payload<DiscoveryRun[]>(r));
+      setConversations(await payload<Conversation[]>(c));
+      const [d, r] = await Promise.all([apiFetch('/contact-ai/discovery-settings'), apiFetch('/contact-ai/discovery/runs')]);
+      setDiscovery(await payload<Discovery>(d));
+      setRuns(await payload<DiscoveryRun[]>(r));
     } catch (e) { setError(e instanceof Error ? e.message : 'Erro ao carregar Contact AI.'); }
   }, [apiFetch]);
 
