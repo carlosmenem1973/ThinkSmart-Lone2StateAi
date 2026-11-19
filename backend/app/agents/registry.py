@@ -4,10 +4,17 @@ These agents are deliberately self-contained and use the already configured Open
 model. Integrations that are not configured (mailbox and internal records) return a
 clear capability notice instead of pretending to have accessed private data.
 """
-from agents import Agent
+from agents import Agent, set_default_openai_key, set_tracing_disabled
 from app.core.config import settings
 
 MODEL = settings.openai_model
+
+# Pydantic loads .env values into settings but does not export them to os.environ.
+# Explicit SDK configuration keeps local and ECS execution consistent. Disable
+# agent tracing because requests may contain user-provided business/email content.
+if settings.openai_api_key:
+    set_default_openai_key(settings.openai_api_key, use_for_tracing=False)
+set_tracing_disabled(True)
 
 AGENTS = {
     "property-discovery": {
