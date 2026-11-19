@@ -8,6 +8,28 @@ stages:
   - deploy_dev
   - deploy_prod
 
+validate_backend:
+  stage: validate
+  image: python:3.12-slim
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+  script:
+    - python -m pip install --no-cache-dir -r backend/requirements.txt
+    - PYTHONPATH=backend python -m compileall -q backend/app
+    - PYTHONPATH=backend python -c "from app.main import app; paths = {route.path for route in app.routes}; assert '/api/v1/agents/{agent_id}/run' in paths; assert '/api/v1/research' in paths; print('Backend import and AI routes OK')"
+
+validate_frontend:
+  stage: validate
+  image: node:22-alpine
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+  script:
+    - cd frontend
+    - npm ci --no-audit --no-fund
+    - npm run build
+
 variables:
   AWS_REGION: "eu-west-1"
   TF_STATE_BUCKET: ""
