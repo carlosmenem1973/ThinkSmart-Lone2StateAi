@@ -70,12 +70,20 @@ All business endpoints require `Authorization: Bearer <access_token>`. The refre
 - `GET /api/v1/leads`
 - `POST /api/v1/leads`
 - `PATCH /api/v1/leads/{id}`
-- `POST /api/v1/research?query=...`
+- `POST /api/v1/research?query=...&source=web|internal` (web research or role-scoped internal lead search)
+- `GET /api/v1/agents` (authenticated list of the six specialist agents)
+- `POST /api/v1/agents/{agent_id}/run` (authenticated execution; JSON body: `{"input":"context or data to analyse"}`)
 - `POST /api/v1/leads/{id}/draft`
 - `POST /api/v1/drafts/{id}/approve`
 - `POST /api/v1/leads/{id}/followups`
 - `GET /api/v1/followups`
 - `GET /api/v1/integrations/microsoft/status`
+
+### AI research and specialist agents
+
+The research endpoint accepts `source=web` (default) or `source=internal`. Internal search only returns leads visible to the signed-in user; administrators can search the full workspace. It does not search private email or external sources.
+
+The six specialist agent IDs are `property-discovery`, `market-analyst`, `lead-qualifier`, `owner-intelligence`, `email-intelligence` and `follow-up-assistant`. Discovery and market analysis use the existing Responses API web-search integration. The other agents analyse only context explicitly supplied in the request body. The email agent requires user-provided email text; Microsoft 365 mailbox synchronisation is not enabled. Every agent result is returned with `requires_human_review: true`; agents do not send email, contact property owners or perform external actions.
 
 Example login:
 ```bash
