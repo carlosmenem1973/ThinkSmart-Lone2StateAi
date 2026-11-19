@@ -331,23 +331,28 @@ def update_lead(lead_id: int, payload: LeadUpdate, user: User = Depends(get_busi
 
 
 @router.get("/ai/status")
-def ai_status(_user: User = Depends(get_business_user)):
+def ai_status(user: User = Depends(get_business_user)):
     """Expose non-sensitive capability status so the UI can explain disabled features."""
     key_configured = bool(settings.openai_api_key.strip())
+    can_run_ai = user.role != UserRole.VIEWER
+    web_ready = key_configured and settings.openai_web_search_enabled and can_run_ai
+    agents_ready = key_configured and can_run_ai
+    access_reason = "A conta tem perfil apenas de consulta. Solicite ao administrador acesso de execução." if not can_run_ai else None
     return {
         "provider": "openai",
         "model": settings.openai_model,
         "api_key_configured": key_configured,
-        "internal_search_enabled": True,
-        "web_search_enabled": key_configured and settings.openai_web_search_enabled,
-        "agents_enabled": key_configured,
+        "internal_search_enabled": can_run_ai,
+        "web_search_enabled": web_ready,
+        "agents_enabled": agents_ready,
         "web_search_reason": (
-            None if key_configured and settings.openai_web_search_enabled
+            access_reason if not can_run_ai
+            else None if key_configured and settings.openai_web_search_enabled
             else "OPENAI_API_KEY não está configurada."
             if not key_configured
             else "Pesquisa Web desativada por OPENAI_WEB_SEARCH_ENABLED."
         ),
-        "agents_reason": None if key_configured else "OPENAI_API_KEY não está configurada no backend.",
+        "agents_reason": access_reason if not can_run_ai else None if key_configured else "OPENAI_API_KEY não está configurada no backend.",
     }
 
 
@@ -450,6 +455,7 @@ async def execute_agent(
     db: Session = Depends(get_db),
 ):
     """Execute a registered agent and return output explicitly marked for human review."""
+    require_write_access(user)
     if agent_id not in AGENT_RUNNERS:
         raise HTTPException(status_code=404, detail="Agente não encontrado.")
     if ai_client is None:
