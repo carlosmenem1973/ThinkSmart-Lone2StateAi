@@ -22,6 +22,7 @@ from app.schemas.auth import ChangePasswordRequest, CreateUserRequest, LoginRequ
 from app.schemas.leads import LeadCreate, LeadOut, LeadUpdate, FollowUpCreate
 from app.schemas.branding import BrandingUpdate
 from app.services.ai import research_web, draft_outreach
+from app.api.agents import router as agents_router
 
 router = APIRouter()
 
@@ -328,13 +329,57 @@ def update_lead(lead_id: int, payload: LeadUpdate, user: User = Depends(get_busi
 
 
 @router.post("/research")
-def run_research(query: str, user: User = Depends(get_business_user), db: Session = Depends(get_db)):
+def run_research(
+    query: str,
+    source: str = "web",
+    user: User = Depends(get_business_user),
+    db: Session = Depends(get_db),
+):
     require_write_access(user)
+    if source not in {"web", "internal"}:
+        raise HTTPException(status_code=422, detail="source deve ser 'web' ou 'internal'")
+
     try:
-        result = research_web(query)
+        if source == "internal":
+            stmt = select(Lead).order_by(Lead.created_at.desc()).limit(100)
+            if user.role not in {UserRole.SUPER_ADMIN, UserRole.ADMIN}:
+                stmt = stmt.where(Lead.assigned_to == user.id)
+            rows = db.scalars(stmt).all()
+            terms = [term.casefold() for term in query.split() if len(term) > 2]
+            matches = []
+            for lead in rows:
+                haystack = " ".join(filter(None, [
+                    lead.title, lead.address, lead.municipality, lead.source_name,
+                    lead.evidence,
+                ])).casefold()
+                if not terms or any(term in haystack for term in terms):
+                    matches.append({
+                        "id": lead.id,
+                        "title": lead.title,
+                        "municipality": lead.municipality,
+                        "address": lead.address,
+                        "source_name": lead.source_name,
+                        "source_url": lead.source_url,
+                        "score": lead.score,
+                        "status": lead.status.value if lead.status else None,
+                        "evidence": lead.evidence,
+                    })
+            result = {
+                "text": f"Pesquisa interna concluída. {len(matches)} registo(s) encontrado(s).",
+                "items": matches,
+                "source": "internal",
+            }
+        else:
+            result = research_web(query)
+            result["source"] = "web"
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise HTTPException(status_code=502, detail="Research provider failed") from exc
-    audit(db, user, "research.executed", "research", result.get("response_id", "unknown"), {"query": query[:500]})
+        raise HTTPException(status_code=502, detail=f"Research provider failed: {type(exc).__name__}") from exc
+
+    audit(db, user, "research.executed", "research", result.get("response_id", "internal"), {
+        "query": query[:500], "source": source, "result_count": len(result.get("items", [])),
+    })
     db.commit()
     return result
 
@@ -412,3 +457,7 @@ def list_followups(user: User = Depends(get_business_user), db: Session = Depend
 @router.get("/integrations/microsoft/status")
 def microsoft_status(_user: User = Depends(get_business_user)):
     return {"configured": bool(settings.microsoft_client_id and settings.microsoft_client_secret), "mailbox_sync_enabled": False, "message": "Per-seller Entra OAuth state binding and encrypted token-cache persistence must be configured before mailbox synchronisation."}
+
+
+# Register specialised agent routes under the same /api/v1 prefix.
+router.include_router(agents_router)
