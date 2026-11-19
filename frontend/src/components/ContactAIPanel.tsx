@@ -9,7 +9,10 @@ type DiscoveryRun = { id: number; action: string; created_at: string; details: {
 
 async function payload<T>(response: Response): Promise<T> {
   const data = await response.json();
-  if (!response.ok) throw new Error(data.detail || 'Não foi possível concluir a operação.');
+  if (!response.ok) {
+    const detail = data?.detail ?? data?.message;
+    throw new Error(typeof detail === 'string' ? detail : detail ? JSON.stringify(detail) : 'Não foi possível concluir a operação.');
+  }
   return data as T;
 }
 
