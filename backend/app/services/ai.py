@@ -161,6 +161,18 @@ def research_web(query: str, *, system_prompt: str | None = None) -> dict[str, A
         max_tokens=2200,
         temperature=0.15,
     )
+    # Build optional visual previews from the exact public listing URLs returned by Web Search.
+    # Preview extraction is best-effort: inaccessible portals still remain in sources.
+    from concurrent.futures import ThreadPoolExecutor
+    from app.services.property_media import extract_property_preview
+
+    candidates = results[:10]
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        properties = list(executor.map(
+            lambda item: extract_property_preview(item["url"], item["title"], item["text"]),
+            candidates,
+        ))
+
     source_footer = "\n\nFontes consultadas:\n" + "\n".join(
         f"[{index}] {item['title']} ÔÇö {item['url']}"
         for index, item in enumerate(results, start=1)
@@ -177,6 +189,7 @@ def research_web(query: str, *, system_prompt: str | None = None) -> dict[str, A
             for index, item in enumerate(results, start=1)
         ],
         "result_count": len(results),
+        "properties": properties,
     }
 
 
