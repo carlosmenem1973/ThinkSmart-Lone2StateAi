@@ -1,3 +1,4 @@
+import asyncio
 import secrets
 import boto3
 import string
@@ -22,8 +23,6 @@ from app.schemas.auth import ChangePasswordRequest, CreateUserRequest, LoginRequ
 from app.schemas.leads import LeadCreate, LeadOut, LeadUpdate, FollowUpCreate
 from app.schemas.branding import BrandingUpdate
 from app.services.ai import research_web, draft_outreach, client as ai_client
-from app.agents.registry import AGENTS, AGENT_RUNNERS
-from agents import Runner
 from app.agents.registry import AGENTS, AGENT_RUNNERS
 from agents import Runner
 
@@ -448,7 +447,7 @@ async def execute_agent(
             task = AGENTS[agent_id]["instructions"] + "\nPedido: " + (
                 supplied or "Identifica oportunidades e tendências recentes no mercado imobiliário português."
             )
-            output = research_web(task).get("text", "")
+            output = (await asyncio.to_thread(research_web, task)).get("text", "")
         else:
             result = await Runner.run(AGENT_RUNNERS[agent_id], supplied)
             output = getattr(result, "final_output", None) or str(result)
