@@ -21,7 +21,7 @@ type User = {
   id: number;
   email: string;
   full_name: string;
-  role: 'admin' | 'seller';
+  role: 'super_admin' | 'admin' | 'manager' | 'seller' | 'viewer';
   territory?: string | null;
   must_change_password: boolean;
 };
@@ -167,6 +167,7 @@ export default function App() {
   const [agentBusy, setAgentBusy] = useState<string | null>(null);
   const [agentResults, setAgentResults] = useState<Record<string, string>>({});
   const [agentError, setAgentError] = useState('');
+  const [agentInput, setAgentInput] = useState('');
 
   const [sellerName, setSellerName] = useState('');
   const [sellerEmail, setSellerEmail] = useState('');
@@ -480,13 +481,17 @@ export default function App() {
   }
 
   async function runAgent(agent: Agent) {
+    if (!['property-discovery', 'market-analyst'].includes(agent.id) && !agentInput.trim()) {
+      setAgentError('Introduza o contexto ou os dados que o agente deve analisar.');
+      return;
+    }
     setAgentBusy(agent.id);
     setAgentError('');
     try {
       // API contract: POST /agents/{agent_id}/run
       const response = await apiFetch(`/agents/${encodeURIComponent(agent.id)}/run`, {
         method: 'POST',
-        body: JSON.stringify({}),
+        body: JSON.stringify({ input: agentInput.trim() }),
       });
       const data = await readResponse<{ text?: string; result?: unknown; message?: string }>(response);
       const result = data.text || data.message || (
@@ -696,7 +701,7 @@ export default function App() {
             <p>Descobrir oportunidades. Qualificar leads. Apoiar a equipa.</p>
           </div>
           <div className="user-menu">
-            <div><b>{user.full_name}</b><small>{user.role === 'admin' ? 'Administrador' : 'Vendedor'} · {user.territory || user.email}</small></div>
+            <div><b>{user.full_name}</b><small>{user.role === 'super_admin' || user.role === 'admin' ? 'Administrador' : user.role === 'manager' ? 'Gestor' : user.role === 'viewer' ? 'Consulta' : 'Vendedor'} · {user.territory || user.email}</small></div>
             <button className="secondary" onClick={signOut}><LogOut size={15} /> Sair</button>
           </div>
         </header>
@@ -755,6 +760,18 @@ export default function App() {
                 <div><h2><Bot size={19} /> Os seis agentes da plataforma</h2><p>Execute tarefas especializadas. Os resultados ficam visíveis para revisão humana.</p></div>
               </div>
               {agentError && <div className="auth-error">{agentError}</div>}
+              <div className="agent-input">
+                <label htmlFor="agent-context">Contexto ou dados para os agentes</label>
+                <textarea
+                  id="agent-context"
+                  value={agentInput}
+                  onChange={event => setAgentInput(event.target.value)}
+                  rows={4}
+                  maxLength={12000}
+                  placeholder="Ex.: Analisa este anúncio T2 em Oeiras, anunciado por 295.000 €, e identifica riscos, pontos fortes e próximos passos. Para o Agente de Email, cola apenas uma mensagem que estejas autorizado a analisar."
+                />
+                <small>Até 12.000 caracteres. O conteúdo é enviado ao backend autenticado; não são enviados emails nem realizadas ações externas.</small>
+              </div>
               <div className="agent-grid">
                 {AGENTS.map(agent => {
                   const Icon = agent.icon;
@@ -811,7 +828,7 @@ export default function App() {
               {passwordMessage && <p className="branding-message">{passwordMessage}</p>}
             </section>
 
-            {user.role === 'admin' && (
+            {(user.role === 'admin' || user.role === 'super_admin') && (
               <section className="panel branding-panel">
                 <div className="panelhead"><div><h2><Palette size={19} /> Identidade visual</h2><p>Personalize a marca sem alterar a configuração de autenticação.</p></div></div>
                 <form className="branding-form" onSubmit={saveBranding}>

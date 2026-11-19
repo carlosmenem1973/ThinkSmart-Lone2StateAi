@@ -4,7 +4,7 @@ import string
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from sqlalchemy import func, select
+from sqlalchemy import func, select, or_
 from sqlalchemy.orm import Session
 
 from app.core.auth import (
@@ -21,7 +21,11 @@ from app.models.entities import (
 from app.schemas.auth import ChangePasswordRequest, CreateUserRequest, LoginRequest, UserOut
 from app.schemas.leads import LeadCreate, LeadOut, LeadUpdate, FollowUpCreate
 from app.schemas.branding import BrandingUpdate
-from app.services.ai import research_web, draft_outreach
+from app.services.ai import research_web, draft_outreach, client as ai_client
+from app.agents.registry import AGENTS, AGENT_RUNNERS
+from agents import Runner
+from app.agents.registry import AGENTS, AGENT_RUNNERS
+from agents import Runner
 
 router = APIRouter()
 
@@ -328,15 +332,140 @@ def update_lead(lead_id: int, payload: LeadUpdate, user: User = Depends(get_busi
 
 
 @router.post("/research")
-def run_research(query: str, user: User = Depends(get_business_user), db: Session = Depends(get_db)):
+def run_research(
+    query: str,
+    source: str = "web",
+    user: User = Depends(get_business_user),
+    db: Session = Depends(get_db),
+):
+    """Run web research or search the signed-in user's permitted internal lead records."""
     require_write_access(user)
-    try:
-        result = research_web(query)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail="Research provider failed") from exc
-    audit(db, user, "research.executed", "research", result.get("response_id", "unknown"), {"query": query[:500]})
+    query = query.strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Introduza uma pesquisa.")
+    if len(query) > 1000:
+        raise HTTPException(status_code=413, detail="A pesquisa excede o limite de 1.000 caracteres.")
+
+    if source == "internal":
+        pattern = f"%{query}%"
+        statement = select(Lead).where(or_(
+            Lead.title.ilike(pattern),
+            Lead.address.ilike(pattern),
+            Lead.municipality.ilike(pattern),
+            Lead.district.ilike(pattern),
+            Lead.source_name.ilike(pattern),
+            Lead.evidence.ilike(pattern),
+        )).order_by(Lead.created_at.desc()).limit(100)
+        if user.role not in {UserRole.SUPER_ADMIN, UserRole.ADMIN}:
+            statement = statement.where(Lead.assigned_to == user.id)
+        matches = db.scalars(statement).all()
+        items = [{
+            "id": lead.id,
+            "title": lead.title,
+            "address": lead.address,
+            "municipality": lead.municipality,
+            "district": lead.district,
+            "source_name": lead.source_name,
+            "source_url": lead.source_url,
+            "score": lead.score,
+            "status": lead.status.value if lead.status else None,
+        } for lead in matches]
+        result = {
+            "source": "internal",
+            "count": len(items),
+            "items": items,
+            "text": (
+                f"Foram encontradas {len(items)} oportunidades nos registos a que tem acesso."
+                if items else "Não foram encontradas oportunidades correspondentes nos registos a que tem acesso."
+            ),
+        }
+    elif source == "web":
+        try:
+            result = research_web(query)
+        except Exception as exc:
+            # Avoid exposing provider payloads, credentials, or internal request details.
+            raise HTTPException(
+                status_code=502,
+                detail=f"Falha no fornecedor de pesquisa ({type(exc).__name__}). Verifique a chave e o modelo configurados no backend.",
+            ) from exc
+    else:
+        raise HTTPException(status_code=422, detail="A origem deve ser 'web' ou 'internal'.")
+
+    audit(db, user, "research.executed", "research", result.get("response_id", "internal"), {
+        "query": query[:500], "source": source, "result_count": result.get("count"),
+    })
     db.commit()
     return result
+
+
+@router.get("/agents")
+def list_agents(_user: User = Depends(get_business_user)):
+    """List the six supported agents for the signed-in workspace."""
+    return {"items": [
+        {
+            "id": agent_id,
+            "name": spec["name"],
+            "description": spec["description"],
+            "purpose": spec["purpose"],
+        }
+        for agent_id, spec in AGENTS.items()
+    ]}
+
+
+@router.post("/agents/{agent_id}/run")
+async def execute_agent(
+    agent_id: str,
+    request: Request,
+    user: User = Depends(get_business_user),
+    db: Session = Depends(get_db),
+):
+    """Execute a registered agent and return output explicitly marked for human review."""
+    require_write_access(user)
+    if agent_id not in AGENT_RUNNERS:
+        raise HTTPException(status_code=404, detail="Agente não encontrado.")
+    if ai_client is None:
+        raise HTTPException(status_code=503, detail="O serviço de IA não está configurado. Verifique OPENAI_API_KEY.")
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    supplied = str(body.get("input") or body.get("query") or "").strip()
+    if len(supplied) > 12000:
+        raise HTTPException(status_code=413, detail="O pedido excede o limite de 12.000 caracteres.")
+
+    if agent_id == "email-intelligence" and not supplied:
+        raise HTTPException(status_code=400, detail="Forneça o texto do email autorizado para análise.")
+    if agent_id in {"owner-intelligence", "lead-qualifier", "follow-up-assistant"} and not supplied:
+        raise HTTPException(status_code=400, detail="Forneça os dados ou contexto que o agente deve analisar.")
+
+    # These two agents use the existing Responses API web-search service. The
+    # other agents use the Agents SDK and only the content supplied by the user.
+    try:
+        if agent_id in {"property-discovery", "market-analyst"}:
+            task = AGENTS[agent_id]["instructions"] + "\nPedido: " + (
+                supplied or "Identifica oportunidades e tendências recentes no mercado imobiliário português."
+            )
+            output = research_web(task).get("text", "")
+        else:
+            result = await Runner.run(AGENT_RUNNERS[agent_id], supplied)
+            output = getattr(result, "final_output", None) or str(result)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Falha na execução do agente ({type(exc).__name__}). Verifique o modelo e a configuração de IA.",
+        ) from exc
+
+    audit(db, user, "agent.executed", "agent", agent_id, {"input_length": len(supplied)})
+    db.commit()
+    return {
+        "agent_id": agent_id,
+        "status": "completed",
+        "text": str(output),
+        "requires_human_review": True,
+    }
 
 
 @router.post("/leads/{lead_id}/draft")
