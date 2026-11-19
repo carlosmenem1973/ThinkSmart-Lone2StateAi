@@ -22,9 +22,8 @@ from app.models.entities import (
 from app.schemas.auth import ChangePasswordRequest, CreateUserRequest, LoginRequest, UserOut
 from app.schemas.leads import LeadCreate, LeadOut, LeadUpdate, FollowUpCreate
 from app.schemas.branding import BrandingUpdate
-from app.services.ai import research_web, draft_outreach, client as ai_client, AIUnavailable
-from app.agents.registry import AGENTS, AGENT_RUNNERS
-from agents import Runner
+from app.services.ai import research_web, draft_outreach, AIUnavailable, ai_available, run_specialist_agent
+from app.agents.registry import AGENTS
 
 router = APIRouter()
 
@@ -332,28 +331,33 @@ def update_lead(lead_id: int, payload: LeadUpdate, user: User = Depends(get_busi
 
 @router.get("/ai/status")
 def ai_status(user: User = Depends(get_business_user)):
-    """Expose non-sensitive capability status so the UI can explain disabled features."""
-    key_configured = bool(settings.openai_api_key.strip())
+    """Expose non-sensitive AWS AI capability status to the authenticated frontend."""
     can_run_ai = user.role != UserRole.VIEWER
-    web_ready = key_configured and settings.openai_web_search_enabled and can_run_ai
-    agents_ready = key_configured and can_run_ai
-    access_reason = "A conta tem perfil apenas de consulta. Solicite ao administrador acesso de execução." if not can_run_ai else None
+    model_configured = ai_available()
+    web_ready = model_configured and settings.bedrock_web_search_enabled and can_run_ai
+    agents_ready = model_configured and can_run_ai
+    access_reason = (
+        "A conta tem perfil apenas de consulta. Solicite ao administrador acesso de execução."
+        if not can_run_ai else None
+    )
     return {
-        "provider": "openai",
-        "model": settings.openai_model,
-        "api_key_configured": key_configured,
+        "bedrock_configured": model_configured,
         "internal_search_enabled": can_run_ai,
         "internal_search_reason": access_reason,
         "web_search_enabled": web_ready,
-        "agents_enabled": agents_ready,
         "web_search_reason": (
             access_reason if not can_run_ai
-            else None if key_configured and settings.openai_web_search_enabled
-            else "OPENAI_API_KEY não está configurada."
-            if not key_configured
-            else "Pesquisa Web desativada por OPENAI_WEB_SEARCH_ENABLED."
+            else None if model_configured and settings.bedrock_web_search_enabled
+            else "BEDROCK_REGION ou BEDROCK_MODEL_ID não está configurado."
+            if not model_configured
+            else "Pesquisa Web desativada por BEDROCK_WEB_SEARCH_ENABLED."
         ),
-        "agents_reason": access_reason if not can_run_ai else None if key_configured else "OPENAI_API_KEY não está configurada no backend.",
+        "agents_enabled": agents_ready,
+        "agents_reason": (
+            access_reason if not can_run_ai
+            else None if model_configured
+            else "BEDROCK_REGION ou BEDROCK_MODEL_ID não está configurado."
+        ),
     }
 
 
@@ -364,7 +368,7 @@ async def run_research(
     user: User = Depends(get_business_user),
     db: Session = Depends(get_db),
 ):
-    """Run web research or search the signed-in user's permitted internal lead records."""
+    """Run AgentCore Web Search + Bedrock synthesis or role-scoped internal lead search."""
     require_write_access(user)
     query = query.strip()
     if not query:
@@ -401,10 +405,10 @@ async def run_research(
             "count": len(items),
             "items": items,
             "text": (
-                f"Foram encontradas {len(items)} oportunidades nos registos a que tem acesso.\n\n"
-                + "\n".join(
+                f"Foram encontradas {len(items)} oportunidades nos registos a que tem acesso.\\n\\n"
+                + "\\n".join(
                     f"- {item['title']} | {item['municipality'] or item['address'] or 'Localização por confirmar'} | "
-                    f"Score: {item['score']}/100 | Estado: {item['status'] or 'por classificar'}\n"
+                    f"Score: {item['score']}/100 | Estado: {item['status'] or 'por classificar'}\\n"
                     f"  Fonte: {item['source_name'] or 'não indicada'} — {item['source_url'] or 'URL não disponível'}"
                     for item in items
                 )
@@ -419,13 +423,13 @@ async def run_research(
         except Exception as exc:
             raise HTTPException(
                 status_code=502,
-                detail=f"Falha no fornecedor de pesquisa ({type(exc).__name__}). Verifique a configuração de IA do backend.",
+                detail=f"Falha na pesquisa AWS ({type(exc).__name__}). Confirme as permissões Bedrock/AgentCore da ECS Task Role.",
             ) from exc
     else:
         raise HTTPException(status_code=422, detail="A origem deve ser 'web' ou 'internal'.")
 
-    audit(db, user, "research.executed", "research", result.get("response_id", "internal"), {
-        "query": query[:500], "source": source, "result_count": result.get("count"),
+    audit(db, user, "research.executed", "research", "internal" if source == "internal" else "agentcore-web-search", {
+        "query": query[:500], "source": source, "result_count": result.get("count", result.get("result_count")),
     })
     db.commit()
     return result
@@ -433,7 +437,8 @@ async def run_research(
 
 @router.get("/agents")
 def list_agents(_user: User = Depends(get_business_user)):
-    """List the six supported agents and report whether execution is available."""
+    """List the six specialist agents and their configuration-level availability."""
+    configured = ai_available()
     return {
         "items": [
             {
@@ -441,11 +446,13 @@ def list_agents(_user: User = Depends(get_business_user)):
                 "name": spec["name"],
                 "description": spec["description"],
                 "purpose": spec["purpose"],
-                "enabled": ai_client is not None,
+                "enabled": configured,
+                "uses_web_search": spec["uses_web_search"],
+                "requires_input": spec["requires_input"],
             }
             for agent_id, spec in AGENTS.items()
         ],
-        "enabled": ai_client is not None,
+        "enabled": configured,
     }
 
 
@@ -456,12 +463,12 @@ async def execute_agent(
     user: User = Depends(get_business_user),
     db: Session = Depends(get_db),
 ):
-    """Execute a registered agent and return output explicitly marked for human review."""
+    """Execute a specialist agent using Amazon Bedrock and AgentCore Web Search."""
     require_write_access(user)
-    if agent_id not in AGENT_RUNNERS:
+    if agent_id not in AGENTS:
         raise HTTPException(status_code=404, detail="Agente não encontrado.")
-    if ai_client is None:
-        raise HTTPException(status_code=503, detail="Os agentes estão indisponíveis: configure OPENAI_API_KEY no Secrets Manager e reinicie o serviço API.")
+    if not ai_available():
+        raise HTTPException(status_code=503, detail="Os agentes estão indisponíveis: configure BEDROCK_REGION e BEDROCK_MODEL_ID no backend.")
 
     try:
         body = await request.json()
@@ -473,31 +480,20 @@ async def execute_agent(
     if len(supplied) > 12000:
         raise HTTPException(status_code=413, detail="O pedido excede o limite de 12.000 caracteres.")
 
-    if agent_id == "email-intelligence" and not supplied:
-        raise HTTPException(status_code=400, detail="Forneça o texto do email autorizado para análise.")
-    if agent_id in {"owner-intelligence", "lead-qualifier", "follow-up-assistant"} and not supplied:
-        raise HTTPException(status_code=400, detail="Forneça os dados ou contexto que o agente deve analisar.")
+    definition = AGENTS[agent_id]
+    if definition["requires_input"] and not supplied:
+        raise HTTPException(status_code=400, detail="Forneça o contexto ou os dados que o agente deve analisar.")
+    if definition["uses_web_search"] and not settings.bedrock_web_search_enabled:
+        raise HTTPException(status_code=503, detail="Pesquisa Web desativada por BEDROCK_WEB_SEARCH_ENABLED.")
 
     try:
-        if agent_id in {"property-discovery", "market-analyst"}:
-            if not settings.openai_web_search_enabled:
-                raise HTTPException(status_code=503, detail="Pesquisa Web desativada por OPENAI_WEB_SEARCH_ENABLED.")
-            task = AGENTS[agent_id]["instructions"] + "\nPedido: " + (
-                supplied or "Identifica oportunidades e tendências recentes no mercado imobiliário português."
-            )
-            response = await asyncio.to_thread(research_web, task)
-            output = response.get("text", "")
-        else:
-            result = await Runner.run(AGENT_RUNNERS[agent_id], supplied)
-            output = getattr(result, "final_output", None) or str(result)
-    except HTTPException:
-        raise
+        result = await asyncio.to_thread(run_specialist_agent, agent_id, supplied)
     except AIUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=502,
-            detail=f"Falha na execução do agente ({type(exc).__name__}). Confirme OPENAI_API_KEY e OPENAI_MODEL no backend.",
+            detail=f"Falha na execução do agente ({type(exc).__name__}). Confirme BEDROCK_MODEL_ID e permissões IAM.",
         ) from exc
 
     audit(db, user, "agent.executed", "agent", agent_id, {"input_length": len(supplied)})
@@ -505,7 +501,8 @@ async def execute_agent(
     return {
         "agent_id": agent_id,
         "status": "completed",
-        "text": str(output),
+        "text": result.get("text", ""),
+        "sources": result.get("sources", []),
         "requires_human_review": True,
     }
 
