@@ -65,14 +65,12 @@ type Dashboard = {
 type SearchMode = 'web' | 'internal';
 
 type AiStatus = {
-  provider: string;
-  model: string;
-  api_key_configured: boolean;
+  bedrock_configured: boolean;
   internal_search_enabled: boolean;
   internal_search_reason?: string | null;
   web_search_enabled: boolean;
-  agents_enabled: boolean;
   web_search_reason?: string | null;
+  agents_enabled: boolean;
   agents_reason?: string | null;
 };
 type Section = 'dashboard' | 'procura' | 'agents' | 'team' | 'settings';
