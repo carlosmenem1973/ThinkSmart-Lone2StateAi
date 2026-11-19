@@ -374,10 +374,10 @@ def run_research(
             "count": len(items),
             "items": items,
             "text": (
-                f"Foram encontradas {len(items)} oportunidades nos registos a que tem acesso.\\n\\n"
-                + "\\n".join(
+                f"Foram encontradas {len(items)} oportunidades nos registos a que tem acesso.\n\n"
+                + "\n".join(
                     f"- {item['title']} | {item['municipality'] or item['address'] or 'Localização por confirmar'} | "
-                    f"Score: {item['score']}/100 | Estado: {item['status'] or 'por classificar'}\\n"
+                    f"Score: {item['score']}/100 | Estado: {item['status'] or 'por classificar'}\n"
                     f"  Fonte: {item['source_name'] or 'não indicada'} — {item['source_url'] or 'URL não disponível'}"
                     for item in items
                 )
