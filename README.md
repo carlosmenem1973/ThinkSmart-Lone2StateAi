@@ -70,7 +70,8 @@ All business endpoints require `Authorization: Bearer <access_token>`. The refre
 - `GET /api/v1/leads`
 - `POST /api/v1/leads`
 - `PATCH /api/v1/leads/{id}`
-- `POST /api/v1/research?query=...`
+- `POST /api/v1/research?query=...&source=web|internal`
+- `POST /api/v1/agents/{agent_id}/run` (six specialist agents; authenticated)
 - `POST /api/v1/leads/{id}/draft`
 - `POST /api/v1/drafts/{id}/approve`
 - `POST /api/v1/leads/{id}/followups`
