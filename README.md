@@ -1,6 +1,6 @@
 # ThinkSmart-Lone2StateAi
 
-AI-assisted real-estate lead research and seller CRM for Portugal. The application includes FastAPI, PostgreSQL, Redis/Celery, OpenAI web research, individual authentication, role-scoped lead CRUD, human-approved outreach drafts, follow-up records and a React dashboard.
+AI-assisted real-estate lead research and seller CRM for Portugal. The application includes FastAPI, PostgreSQL, Redis/Celery, Amazon Bedrock Nova and AgentCore Web Search, individual authentication, role-scoped lead CRUD, human-approved outreach drafts, follow-up records and a React dashboard.
 
 ## Important implementation boundary
 
@@ -12,7 +12,7 @@ Authentication is now implemented in the application: individual email/password 
 - Ubuntu Server 24.04 LTS or Docker Desktop for local development
 - Docker Engine + Docker Compose plugin
 - AWS account, domain (optional), and a GitLab project/runner for the AWS deployment
-- OpenAI API key with Responses API web search access
+- AWS IAM permissions for Amazon Bedrock Nova Lite and AgentCore Web Search
 - Microsoft Entra app registration for delegated OAuth
 
 ## Quick start (development / initial test)
@@ -20,7 +20,7 @@ Authentication is now implemented in the application: individual email/password 
 cp .env.example .env
 # Edit .env. Generate strong secrets:
 openssl rand -hex 32
-# Set POSTGRES_PASSWORD, REDIS_PASSWORD, SECRET_KEY, OPENAI_API_KEY
+# Set POSTGRES_PASSWORD, REDIS_PASSWORD and SECRET_KEY
 # Set BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD (minimum 16 chars)
 # Set FRONTEND_ORIGIN=http://localhost:5173 and COOKIE_SECURE=false for local HTTP development
 # Set Microsoft values only when configuring Entra.
@@ -49,8 +49,8 @@ The included Nginx configuration is an HTTP reverse proxy starter. For productio
 ## Microsoft 365 setup
 Microsoft mailbox synchronisation is not enabled in this release. When implementing it, create an Entra app registration, use delegated `User.Read` and `Mail.Read` scopes, bind OAuth state to the signed-in seller, and persist each seller's MSAL token cache encrypted. Do not grant tenant-wide application `Mail.Read` permissions without a separate security and mailbox-scoping review.
 
-## OpenAI
-The discovery endpoint uses the Responses API with the hosted `web_search` tool. The model is configurable through `OPENAI_MODEL`. Confirm model availability and project limits in your OpenAI account before deployment. Search output includes source URLs/citations in the model text where available. It is not a guarantee of exhaustive web coverage.
+## Amazon Bedrock and AgentCore
+The application uses the Amazon Bedrock Converse API with the EU inference profile `eu.amazon.nova-lite-v1:0` and Amazon Bedrock AgentCore Web Search (`web-search.v1`) in `eu-west-1`. The ECS task role authenticates through its standard AWS credentials; no OpenAI API key or third-party search key is required. AgentCore search results include source URLs and extracts; preserve and display source links in reports. Configure the scoped IAM permissions in `backend/thinksmart-bedrock-policy.json` (also provisioned by OpenTofu for ECS tasks).
 
 ## API endpoints
 All business endpoints require `Authorization: Bearer <access_token>`. The refresh and logout endpoints use the HttpOnly refresh cookie plus same-origin validation. Public endpoints are limited to health and login.
