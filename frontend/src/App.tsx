@@ -1,4 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import ContactAIPanel from './components/ContactAIPanel';
 import {
   fetchAuthSession,
   signIn as cognitoSignIn,
