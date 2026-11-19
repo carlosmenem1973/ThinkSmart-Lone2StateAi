@@ -439,6 +439,7 @@ async def run_research(
 async def analyse_research_image(
     request: Request,
     user: User = Depends(get_business_user),
+    db: Session = Depends(get_db),
 ):
     """Analyse a real listing photograph supplied by the listing preview; never generate images."""
     require_write_access(user)
@@ -455,8 +456,12 @@ async def analyse_research_image(
     if len(context) > 1000:
         raise HTTPException(status_code=413, detail="O contexto excede 1.000 caracteres.")
     try:
+        from urllib.parse import urlparse
         from app.services.property_media import analyse_property_image
-        return await asyncio.to_thread(analyse_property_image, image_url, context)
+        result = await asyncio.to_thread(analyse_property_image, image_url, context)
+        audit(db, user, "property.image_analysed", "research", "visual-analysis", {"image_host": urlparse(image_url).hostname})
+        db.commit()
+        return result
     except AIUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
