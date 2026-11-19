@@ -821,6 +821,7 @@ export default function App() {
             <form className="searchrow" onSubmit={runSearch}>
               <input value={query} onChange={event => setQuery(event.target.value)}
                 placeholder="Ex.: apartamentos T2 em Lisboa até 350.000 €" />
+              <button type="button" className="secondary" aria-label="Ditar pesquisa" onClick={() => startDictation(text => setQuery(current => `${current} ${text}`.trim()))}><Mic size={16}/> Voz</button>
               <button disabled={searchBusy || !query.trim() || (searchMode === 'web' && aiStatus !== null && !aiStatus.web_search_enabled) || (searchMode === 'internal' && aiStatus !== null && !aiStatus.internal_search_enabled)} type="submit">
                 {searchBusy ? <><LoaderCircle className="spin" size={16} /> A pesquisar…</> : <><Search size={16} /> Procurar</>}
               </button>
@@ -846,6 +847,7 @@ export default function App() {
               {agentError && <div className="auth-error">{agentError}</div>}
               <div className="agent-input">
                 <label htmlFor="agent-context">Contexto ou dados para os agentes</label>
+                <button type="button" className="secondary" onClick={() => startDictation(text => setAgentInput(current => `${current} ${text}`.trim()))}><Mic size={15}/> Ditar contexto</button>
                 <textarea
                   id="agent-context"
                   value={agentInput}
