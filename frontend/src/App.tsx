@@ -470,8 +470,22 @@ export default function App() {
       // API contract: POST /research?query=...&source=web|internal
       const params = new URLSearchParams({ query: query.trim(), source: searchMode });
       const response = await apiFetch(`/research?${params.toString()}`, { method: 'POST' });
-      const data = await readResponse<{ text?: string; detail?: string; items?: unknown[] }>(response);
-      setReport(data.text || data.detail || JSON.stringify(data.items || data, null, 2));
+      const data = await readResponse<{
+        text?: string;
+        detail?: string;
+        items?: unknown[];
+        sources?: Array<{ index: number; title?: string; url?: string; published_at?: string }>;
+      }>(response);
+      const sections = [data.text || data.detail || 'Pesquisa concluída.'];
+      if (data.items?.length) {
+        sections.push(`Resultados internos:\n${JSON.stringify(data.items, null, 2)}`);
+      }
+      if (data.sources?.length) {
+        sections.push('Fontes consultadas:\n' + data.sources.map(source =>
+          `[${source.index}] ${source.title || 'Fonte'} — ${source.url || ''}${source.published_at ? ` (${source.published_at})` : ''}`
+        ).join('\n'));
+      }
+      setReport(sections.join('\n\n'));
     } catch (error) {
       setSearchError(error instanceof Error ? error.message : 'A pesquisa não foi concluída.');
     } finally {
@@ -488,10 +502,22 @@ export default function App() {
         method: 'POST',
         body: JSON.stringify({ query: query.trim() }),
       });
-      const data = await readResponse<{ text?: string; result?: unknown; message?: string }>(response);
-      const result = data.text || data.message || (
-        typeof data.result === 'string' ? data.result : JSON.stringify(data.result ?? data, null, 2)
-      );
+      const data = await readResponse<{
+        text?: string;
+        result?: unknown;
+        message?: string;
+        sources?: Array<{ index: number; title?: string; url?: string; published_at?: string }>;
+      }>(response);
+      const result = [
+        data.text || data.message || (
+          typeof data.result === 'string' ? data.result : JSON.stringify(data.result ?? data, null, 2)
+        ),
+        ...(data.sources?.length ? [
+          'Fontes consultadas:\\n' + data.sources.map(source =>
+            `[${source.index}] ${source.title || 'Fonte'} — ${source.url || ''}${source.published_at ? ` (${source.published_at})` : ''}`
+          ).join('\\n')
+        ] : []),
+      ].join('\\n\\n');
       setAgentResults(previous => ({ ...previous, [agent.id]: result }));
     } catch (error) {
       setAgentError(error instanceof Error ? error.message : `Não foi possível executar ${agent.name}.`);
