@@ -18,6 +18,10 @@ celery.conf.update(
             "task": "app.workers.tasks.daily_research",
             "schedule": 86400.0,
         },
+        "property-discovery-scheduler": {
+            "task": "app.workers.contact_ai_tasks.run_scheduled_property_discovery",
+            "schedule": 300.0,
+        },
         "contact-ai-every-30-minutes": {
             "task": "app.workers.contact_ai_tasks.process_contact_queue",
             "schedule": 1800.0,

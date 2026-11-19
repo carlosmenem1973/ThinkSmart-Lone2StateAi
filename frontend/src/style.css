@@ -44,3 +44,22 @@
 .ai-capability{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;margin:0 0 16px;padding:11px 13px;background:#f8fafc;border:1px solid #e7ebf0;border-radius:9px;color:#526174;font-size:12px}
 .ai-capability b{color:#263548}
 .ai-capability small{flex-basis:100%;color:#a52828;line-height:1.5}
+
+
+/* ThinkSmart responsive layout hardening and discovery report cards */
+.shell{min-width:0}main{min-width:0;overflow-x:hidden}.panel,.stat,.agent-card{min-width:0}
+.agent-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr))}
+.searchrow{align-items:stretch}.searchrow input{min-width:0}
+.report{overflow-wrap:anywhere;word-break:break-word}
+.tablewrap{max-width:100%;overscroll-behavior-x:contain}.tablewrap table{min-width:680px}
+.discovery-runs{display:grid;gap:12px}.discovery-run{min-width:0;padding:14px;border:1px solid #e7ebf0;border-radius:10px;background:#fff;display:grid;gap:8px}
+.discovery-run small{color:#778394;overflow-wrap:anywhere}.discovery-run a{color:#2563eb;font-size:12px;overflow-wrap:anywhere}
+@media(max-width:700px){
+ main{padding:18px 14px}header{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;gap:12px}
+ header>div:first-of-type{grid-column:2}header .user-menu{grid-column:1/-1;min-width:0;flex-wrap:wrap}
+ .stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.stat{padding:14px}.stat strong{font-size:22px}
+ .panel{padding:15px}.panelhead{align-items:flex-start;gap:10px;flex-wrap:wrap}
+ .searchrow{display:grid;grid-template-columns:minmax(0,1fr)}.searchrow button{width:100%}
+ .mode-switch{display:flex;flex-wrap:wrap}.mode-switch button{flex:1 1 150px}
+ .agent-grid{grid-template-columns:minmax(0,1fr)}.branding-form{grid-template-columns:minmax(0,1fr)}
+}

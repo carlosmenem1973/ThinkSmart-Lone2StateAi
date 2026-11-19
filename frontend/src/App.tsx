@@ -13,7 +13,7 @@ import {
   Building2, Users, Search, Mail, CalendarClock, ChartNoAxesCombined,
   RefreshCw, ShieldCheck, LogOut, LockKeyhole, UserPlus, Palette,
   Bot, Globe2, Database, Play, CheckCircle2, LoaderCircle, MapPin, MessageCircle,
-  TrendingUp, UserSearch, ClipboardCheck, Menu, X,
+  TrendingUp, UserSearch, ClipboardCheck, Menu, X, Mic,
 } from 'lucide-react';
 
 function normaliseApiBase(configured?: string): string {
@@ -148,13 +148,33 @@ async function readResponse<T>(response: Response): Promise<T> {
   }
   const payload = await response.json();
   if (!response.ok) {
-    const detail = payload?.detail || payload?.message;
+    const rawDetail = payload?.detail || payload?.message;
+    const detail = typeof rawDetail === "string" ? rawDetail : rawDetail ? JSON.stringify(rawDetail) : "";
     if (response.status === 404 && (!detail || detail === 'Not Found')) {
       throw new Error(`A rota não existe na versão da API em execução (${API}). O backend precisa de ser publicado com as rotas de Procura IA e Agentes IA.`);
     }
     throw new Error(detail || `Erro HTTP ${response.status}`);
   }
   return payload as T;
+}
+
+function startDictation(onText: (text: string) => void) {
+  const browser = window as unknown as { SpeechRecognition?: new () => any; webkitSpeechRecognition?: new () => any };
+  const SpeechRecognitionCtor = browser.SpeechRecognition || browser.webkitSpeechRecognition;
+  if (!SpeechRecognitionCtor) {
+    window.alert('O reconhecimento de voz não é suportado neste navegador. Pode escrever o pedido.');
+    return;
+  }
+  const recognition = new SpeechRecognitionCtor();
+  recognition.lang = 'pt-PT';
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+  recognition.onresult = (event: any) => {
+    const transcript = event.results?.[0]?.[0]?.transcript;
+    if (typeof transcript === 'string' && transcript.trim()) onText(transcript.trim());
+  };
+  recognition.onerror = () => window.alert('Não foi possível reconhecer a voz. Tente novamente ou escreva o pedido.');
+  recognition.start();
 }
 
 export default function App() {
@@ -801,6 +821,7 @@ export default function App() {
             <form className="searchrow" onSubmit={runSearch}>
               <input value={query} onChange={event => setQuery(event.target.value)}
                 placeholder="Ex.: apartamentos T2 em Lisboa até 350.000 €" />
+              <button type="button" className="secondary" aria-label="Ditar pesquisa" onClick={() => startDictation(text => setQuery(current => `${current} ${text}`.trim()))}><Mic size={16}/> Voz</button>
               <button disabled={searchBusy || !query.trim() || (searchMode === 'web' && aiStatus !== null && !aiStatus.web_search_enabled) || (searchMode === 'internal' && aiStatus !== null && !aiStatus.internal_search_enabled)} type="submit">
                 {searchBusy ? <><LoaderCircle className="spin" size={16} /> A pesquisar…</> : <><Search size={16} /> Procurar</>}
               </button>
@@ -826,6 +847,7 @@ export default function App() {
               {agentError && <div className="auth-error">{agentError}</div>}
               <div className="agent-input">
                 <label htmlFor="agent-context">Contexto ou dados para os agentes</label>
+                <button type="button" className="secondary" onClick={() => startDictation(text => setAgentInput(current => `${current} ${text}`.trim()))}><Mic size={15}/> Ditar contexto</button>
                 <textarea
                   id="agent-context"
                   value={agentInput}

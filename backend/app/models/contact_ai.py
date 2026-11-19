@@ -14,6 +14,11 @@ class ContactAISettings(Base):
     interval_minutes: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
     channel: Mapped[str] = mapped_column(String(20), default="website", nullable=False)
     paused_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    search_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    search_query: Mapped[str] = mapped_column(Text, default="Oportunidades imobiliárias publicadas recentemente em Portugal", nullable=False)
+    search_interval_minutes: Mapped[int] = mapped_column(Integer, default=1440, nullable=False)
+    last_search_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_search_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
