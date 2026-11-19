@@ -486,7 +486,7 @@ export default function App() {
       // API contract: POST /agents/{agent_id}/run
       const response = await apiFetch(`/agents/${encodeURIComponent(agent.id)}/run`, {
         method: 'POST',
-        body: JSON.stringify({}),
+        body: JSON.stringify({ query: query.trim() }),
       });
       const data = await readResponse<{ text?: string; result?: unknown; message?: string }>(response);
       const result = data.text || data.message || (
