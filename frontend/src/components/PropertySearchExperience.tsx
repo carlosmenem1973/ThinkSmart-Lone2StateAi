@@ -1,7 +1,4 @@
 import { FormEvent, useMemo, useState } from 'react';
-import { MapContainer, Marker, Popup, TileLayer } from 'react-leaflet';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
 import { Search, LoaderCircle, Images, MapPin, ExternalLink, Sparkles, Scale, LayoutGrid, Map as MapIcon, AlertCircle } from 'lucide-react';
 import './PropertySearchExperience.css';
 
@@ -14,7 +11,6 @@ type Property = {
 type SearchResponse = { text?: string; properties?: Property[]; sources?: Array<{title:string;url:string}>; result_count?: number };
 type Props = { apiFetch: ApiFetch; aiStatus?: {web_search_enabled:boolean;web_search_reason?:string|null}|null; aiStatusError?:string };
 type View = 'grid' | 'map';
-const markerIcon = L.divIcon({className:'ts-property-marker',html:'<span></span>',iconSize:[26,26],iconAnchor:[13,13]});
 
 function formatPrice(price?: string | null, currency?: string | null) {
   if (!price) return 'Preço não indicado';
@@ -36,9 +32,10 @@ export default function PropertySearchExperience({apiFetch,aiStatus,aiStatusErro
   const properties = result?.properties || [];
   const comparable = useMemo(()=>properties.filter(p=>compare.includes(p.url)).slice(0,3),[properties,compare]);
   const mapped = properties.filter(p=>Number.isFinite(p.latitude)&&Number.isFinite(p.longitude));
-  const center:[number,number] = mapped.length
-    ? [mapped.reduce((n,p)=>n+Number(p.latitude),0)/mapped.length,mapped.reduce((n,p)=>n+Number(p.longitude),0)/mapped.length]
-    : [38.7223,-9.1393];
+  const center = mapped.length ? mapped[0] : null;
+  const mapUrl = center
+    ? 'https://www.openstreetmap.org/export/embed.html?bbox=' + (Number(center.longitude)-0.08) + '%2C' + (Number(center.latitude)-0.06) + '%2C' + (Number(center.longitude)+0.08) + '%2C' + (Number(center.latitude)+0.06) + '&layer=mapnik&marker=' + center.latitude + '%2C' + center.longitude
+    : '';
 
   async function search(event:FormEvent) {
     event.preventDefault(); if(!query.trim()) return;
@@ -96,7 +93,7 @@ export default function PropertySearchExperience({apiFetch,aiStatus,aiStatusErro
           {analysis[p.url]&&<div className="property-analysis"><b>Análise visual IA</b><p>{analysis[p.url]}</p><small>Descrição visual assistida por IA; não constitui avaliação ou inspeção técnica.</small></div>}
         </div></article>)}</div>}
       {view==='map'&&<div className="property-map-panel">
-        {mapped.length?<MapContainer center={center} zoom={10} scrollWheelZoom={false} className="property-map"><TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/>{mapped.map(p=><Marker key={p.url} position={[Number(p.latitude),Number(p.longitude)]} icon={markerIcon}><Popup><b>{p.title}</b><br/>{formatPrice(p.price,p.currency)}<br/><a href={p.url} target="_blank" rel="noreferrer">Abrir anúncio</a></Popup></Marker>)}</MapContainer>:<div className="property-map-empty"><MapPin size={30}/><b>Sem coordenadas verificadas</b><span>As fontes não publicaram coordenadas. Não vamos inventar localizações.</span></div>}
+        {center?<iframe title="Mapa dos imóveis com coordenadas publicadas" className="property-map" src={mapUrl} loading="lazy" referrerPolicy="no-referrer" />:<div className="property-map-empty"><MapPin size={30}/><b>Sem coordenadas verificadas</b><span>As fontes não publicaram coordenadas. Não vamos inventar localizações.</span></div>}
         <div className="property-map-list">{properties.map(p=><a key={p.url} href={'https://www.openstreetmap.org/search?query='+encodeURIComponent(p.address||p.title)} target="_blank" rel="noreferrer"><MapPin size={14}/><span>{p.title}<small>{p.address||'Localização por confirmar'}</small></span></a>)}</div>
         <small className="property-map-attribution">OpenStreetMap · Coordenadas apenas quando publicadas na fonte.</small>
       </div>}
