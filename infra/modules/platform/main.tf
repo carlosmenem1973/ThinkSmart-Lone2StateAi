@@ -211,24 +211,24 @@ resource "aws_iam_policy" "task_bedrock" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid      = "InvokeEUNovaMicroInferenceProfile"
+        Sid      = "InvokeEUNovaLiteInferenceProfile"
         Effect   = "Allow"
         Action   = ["bedrock:InvokeModel"]
-        Resource = "arn:aws:bedrock:${var.aws_region}:${data.aws_caller_identity.current.account_id}:inference-profile/eu.amazon.nova-micro-v1:0"
+        Resource = "arn:aws:bedrock:${var.aws_region}:${data.aws_caller_identity.current.account_id}:inference-profile/eu.amazon.nova-lite-v1:0"
       },
       {
-        Sid    = "InvokeEUNovaMicroDestinationModels"
+        Sid    = "InvokeEUNovaLiteDestinationModels"
         Effect = "Allow"
         Action = ["bedrock:InvokeModel"]
         Resource = [
-          "arn:aws:bedrock:eu-west-1::foundation-model/amazon.nova-micro-v1:0",
-          "arn:aws:bedrock:eu-west-3::foundation-model/amazon.nova-micro-v1:0",
-          "arn:aws:bedrock:eu-central-1::foundation-model/amazon.nova-micro-v1:0",
-          "arn:aws:bedrock:eu-north-1::foundation-model/amazon.nova-micro-v1:0"
+          "arn:aws:bedrock:eu-west-1::foundation-model/amazon.nova-lite-v1:0",
+          "arn:aws:bedrock:eu-west-3::foundation-model/amazon.nova-lite-v1:0",
+          "arn:aws:bedrock:eu-central-1::foundation-model/amazon.nova-lite-v1:0",
+          "arn:aws:bedrock:eu-north-1::foundation-model/amazon.nova-lite-v1:0"
         ]
         Condition = {
           StringEquals = {
-            "bedrock:InferenceProfileArn" = "arn:aws:bedrock:${var.aws_region}:${data.aws_caller_identity.current.account_id}:inference-profile/eu.amazon.nova-micro-v1:0"
+            "bedrock:InferenceProfileArn" = "arn:aws:bedrock:${var.aws_region}:${data.aws_caller_identity.current.account_id}:inference-profile/eu.amazon.nova-lite-v1:0"
           }
         }
       },
@@ -236,7 +236,7 @@ resource "aws_iam_policy" "task_bedrock" {
         Sid      = "ReadEUInferenceProfile"
         Effect   = "Allow"
         Action   = ["bedrock:GetInferenceProfile"]
-        Resource = "arn:aws:bedrock:${var.aws_region}:${data.aws_caller_identity.current.account_id}:inference-profile/eu.amazon.nova-micro-v1:0"
+        Resource = "arn:aws:bedrock:${var.aws_region}:${data.aws_caller_identity.current.account_id}:inference-profile/eu.amazon.nova-lite-v1:0"
       },
       {
         Sid      = "InvokeAgentCoreWebSearch"
@@ -393,7 +393,7 @@ resource "aws_ecs_task_definition" "api" {
   memory = var.api_memory
   execution_role_arn = aws_iam_role.execution.arn
   task_role_arn = aws_iam_role.task.arn
-  container_definitions = jsonencode([{ name = "api", image = "${aws_ecr_repository.api.repository_url}:${var.api_image_tag}", essential = true, portMappings = [{ containerPort = 8000, protocol = "tcp" }], environment = [{ name = "APP_NAME", value = "ThinkSmart-Lone2StateAi" }, { name = "ENVIRONMENT", value = var.environment }, { name = "TIMEZONE", value = "Europe/Lisbon" }, { name = "BEDROCK_REGION", value = var.aws_region }, { name = "BEDROCK_MODEL_ID", value = "eu.amazon.nova-micro-v1:0" }, { name = "BEDROCK_WEB_SEARCH_ENABLED", value = "true" }, { name = "BEDROCK_WEB_SEARCH_ID", value = "web-search.v1" }, { name = "COOKIE_SECURE", value = "true" }, { name = "FRONTEND_ORIGIN", value = var.frontend_domain_name == "" ? "https://${aws_cloudfront_distribution.frontend.domain_name}" : "https://${var.frontend_domain_name}" }], secrets = [{ name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" }, { name = "REDIS_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:REDIS_URL::" }, { name = "SECRET_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SECRET_KEY::" }, { name = "BOOTSTRAP_ADMIN_EMAIL", valueFrom = "${aws_secretsmanager_secret.app.arn}:BOOTSTRAP_ADMIN_EMAIL::" }, { name = "BOOTSTRAP_ADMIN_PASSWORD", valueFrom = "${aws_secretsmanager_secret.app.arn}:BOOTSTRAP_ADMIN_PASSWORD::" }, { name = "MICROSOFT_CLIENT_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:MICROSOFT_CLIENT_ID::" }, { name = "MICROSOFT_CLIENT_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:MICROSOFT_CLIENT_SECRET::" }, { name = "MICROSOFT_TENANT_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:MICROSOFT_TENANT_ID::" }, { name = "MICROSOFT_REDIRECT_URI", valueFrom = "${aws_secretsmanager_secret.app.arn}:MICROSOFT_REDIRECT_URI::" }, { name = "GOOGLE_MAPS_API_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:GOOGLE_MAPS_API_KEY::" }], logConfiguration = { logDriver = "awslogs", options = { "awslogs-group" = aws_cloudwatch_log_group.api.name, "awslogs-region" = var.aws_region, "awslogs-stream-prefix" = "api" } } }])
+  container_definitions = jsonencode([{ name = "api", image = "${aws_ecr_repository.api.repository_url}:${var.api_image_tag}", essential = true, portMappings = [{ containerPort = 8000, protocol = "tcp" }], environment = [{ name = "APP_NAME", value = "ThinkSmart-Lone2StateAi" }, { name = "ENVIRONMENT", value = var.environment }, { name = "TIMEZONE", value = "Europe/Lisbon" }, { name = "BEDROCK_REGION", value = var.aws_region }, { name = "BEDROCK_MODEL_ID", value = "eu.amazon.nova-lite-v1:0" }, { name = "BEDROCK_WEB_SEARCH_ENABLED", value = "true" }, { name = "BEDROCK_WEB_SEARCH_ID", value = "web-search.v1" }, { name = "COOKIE_SECURE", value = "true" }, { name = "FRONTEND_ORIGIN", value = var.frontend_domain_name == "" ? "https://${aws_cloudfront_distribution.frontend.domain_name}" : "https://${var.frontend_domain_name}" }], secrets = [{ name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" }, { name = "REDIS_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:REDIS_URL::" }, { name = "SECRET_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SECRET_KEY::" }, { name = "BOOTSTRAP_ADMIN_EMAIL", valueFrom = "${aws_secretsmanager_secret.app.arn}:BOOTSTRAP_ADMIN_EMAIL::" }, { name = "BOOTSTRAP_ADMIN_PASSWORD", valueFrom = "${aws_secretsmanager_secret.app.arn}:BOOTSTRAP_ADMIN_PASSWORD::" }, { name = "MICROSOFT_CLIENT_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:MICROSOFT_CLIENT_ID::" }, { name = "MICROSOFT_CLIENT_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:MICROSOFT_CLIENT_SECRET::" }, { name = "MICROSOFT_TENANT_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:MICROSOFT_TENANT_ID::" }, { name = "MICROSOFT_REDIRECT_URI", valueFrom = "${aws_secretsmanager_secret.app.arn}:MICROSOFT_REDIRECT_URI::" }, { name = "GOOGLE_MAPS_API_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:GOOGLE_MAPS_API_KEY::" }], logConfiguration = { logDriver = "awslogs", options = { "awslogs-group" = aws_cloudwatch_log_group.api.name, "awslogs-region" = var.aws_region, "awslogs-stream-prefix" = "api" } } }])
   depends_on = [aws_iam_role_policy_attachment.execution, aws_iam_role_policy_attachment.task_secrets, aws_iam_role_policy_attachment.task_bedrock]
 }
 resource "aws_ecs_task_definition" "worker" {
@@ -404,7 +404,7 @@ resource "aws_ecs_task_definition" "worker" {
   memory = var.worker_memory
   execution_role_arn = aws_iam_role.execution.arn
   task_role_arn = aws_iam_role.task.arn
-  container_definitions = jsonencode([{ name = "worker", image = "${aws_ecr_repository.worker.repository_url}:${var.api_image_tag}", essential = true, command = ["sh", "-c", "until alembic current 2>/dev/null | grep -q '(head)'; do sleep 3; done; exec celery -A app.workers.celery_app.celery worker --beat --loglevel=INFO"], environment = [{ name = "ENVIRONMENT", value = var.environment }, { name = "TIMEZONE", value = "Europe/Lisbon" }, { name = "BEDROCK_REGION", value = var.aws_region }, { name = "BEDROCK_MODEL_ID", value = "eu.amazon.nova-micro-v1:0" }, { name = "BEDROCK_WEB_SEARCH_ENABLED", value = "true" }, { name = "BEDROCK_WEB_SEARCH_ID", value = "web-search.v1" }], secrets = [{ name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" }, { name = "REDIS_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:REDIS_URL::" }, { name = "SECRET_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SECRET_KEY::" }], logConfiguration = { logDriver = "awslogs", options = { "awslogs-group" = aws_cloudwatch_log_group.worker.name, "awslogs-region" = var.aws_region, "awslogs-stream-prefix" = "worker" } } }])
+  container_definitions = jsonencode([{ name = "worker", image = "${aws_ecr_repository.worker.repository_url}:${var.api_image_tag}", essential = true, command = ["sh", "-c", "until alembic current 2>/dev/null | grep -q '(head)'; do sleep 3; done; exec celery -A app.workers.celery_app.celery worker --beat --loglevel=INFO"], environment = [{ name = "ENVIRONMENT", value = var.environment }, { name = "TIMEZONE", value = "Europe/Lisbon" }, { name = "BEDROCK_REGION", value = var.aws_region }, { name = "BEDROCK_MODEL_ID", value = "eu.amazon.nova-lite-v1:0" }, { name = "BEDROCK_WEB_SEARCH_ENABLED", value = "true" }, { name = "BEDROCK_WEB_SEARCH_ID", value = "web-search.v1" }], secrets = [{ name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" }, { name = "REDIS_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:REDIS_URL::" }, { name = "SECRET_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SECRET_KEY::" }], logConfiguration = { logDriver = "awslogs", options = { "awslogs-group" = aws_cloudwatch_log_group.worker.name, "awslogs-region" = var.aws_region, "awslogs-stream-prefix" = "worker" } } }])
   depends_on = [aws_iam_role_policy_attachment.execution, aws_iam_role_policy_attachment.task_secrets, aws_iam_role_policy_attachment.task_bedrock]
 }
 resource "aws_ecs_service" "api" {

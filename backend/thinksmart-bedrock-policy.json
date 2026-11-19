@@ -29,11 +29,17 @@
         }
       }
     },
-    {
-      "Sid": "InvokeAgentCoreWebSearch",
-      "Effect": "Allow",
-      "Action": "bedrock-agentcore:InvokeWebSearch",
-      "Resource": "arn:aws:bedrock-agentcore:eu-west-1:aws:tool/web-search.v1"
-    }
-  ]
+{
+  "Sid": "InvokeAgentCoreWebSearch",
+  "Effect": "Allow",
+  "Action": "bedrock-agentcore:InvokeWebSearch",
+  "Resource": "arn:aws:bedrock-agentcore:eu-west-1:aws:tool/web-search.v1"
+},
+{
+  "Sid": "ReadEUInferenceProfile",
+  "Effect": "Allow",
+  "Action": "bedrock:GetInferenceProfile",
+  "Resource": "arn:aws:bedrock:eu-west-1:049451987829:inference-profile/eu.amazon.nova-lite-v1:0"
+}  
+]
 }

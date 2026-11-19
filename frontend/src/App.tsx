@@ -1,4 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import ContactAIPanel from './components/ContactAIPanel';
 import {
   fetchAuthSession,
   signIn as cognitoSignIn,
@@ -11,7 +12,7 @@ import {
 import {
   Building2, Users, Search, Mail, CalendarClock, ChartNoAxesCombined,
   RefreshCw, ShieldCheck, LogOut, LockKeyhole, UserPlus, Palette,
-  Bot, Globe2, Database, Play, CheckCircle2, LoaderCircle, MapPin,
+  Bot, Globe2, Database, Play, CheckCircle2, LoaderCircle, MapPin, MessageCircle,
   TrendingUp, UserSearch, ClipboardCheck, Menu, X,
 } from 'lucide-react';
 
@@ -73,7 +74,7 @@ type AiStatus = {
   agents_enabled: boolean;
   agents_reason?: string | null;
 };
-type Section = 'dashboard' | 'procura' | 'agents' | 'team' | 'settings';
+type Section = 'dashboard' | 'procura' | 'agents' | 'contact-ai' | 'team' | 'settings';
 
 type Agent = {
   id: string;
@@ -359,6 +360,7 @@ export default function App() {
     { id: 'dashboard' as const, label: 'Dashboard', icon: ChartNoAxesCombined },
     { id: 'procura' as const, label: 'Procura IA', icon: Search },
     { id: 'agents' as const, label: 'Agentes IA', icon: Bot },
+    { id: 'contact-ai' as const, label: 'Contact AI', icon: MessageCircle },
     { id: 'team' as const, label: 'Equipa', icon: Users },
     { id: 'settings' as const, label: 'Definições', icon: ShieldCheck },
   ], []);
@@ -740,7 +742,7 @@ export default function App() {
           <button className="mobile-menu" onClick={() => setMobileNavOpen(true)} aria-label="Abrir menu"><Menu /></button>
           <div>
             <small>{branding.tagline.toUpperCase()}</small>
-            <h1>{section === 'procura' ? 'Procura IA' : section === 'agents' ? 'Agentes IA' : section === 'team' ? 'Equipa' : section === 'settings' ? 'Definições' : 'Dashboard'}</h1>
+            <h1>{section === 'procura' ? 'Procura IA' : section === 'agents' ? 'Agentes IA' : section === 'contact-ai' ? 'Contact AI' : section === 'team' ? 'Equipa' : section === 'settings' ? 'Definições' : 'Dashboard'}</h1>
             <p>Descobrir oportunidades. Qualificar leads. Apoiar a equipa.</p>
           </div>
           <div className="user-menu">
@@ -855,6 +857,8 @@ export default function App() {
             </section>
           </>
         )}
+
+        {section === 'contact-ai' && <ContactAIPanel apiFetch={apiFetch} role={user.role} />}
 
         {section === 'team' && (
           <>
