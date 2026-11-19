@@ -15,7 +15,15 @@ import {
   TrendingUp, UserSearch, ClipboardCheck, Menu, X,
 } from 'lucide-react';
 
-const API = (import.meta.env.VITE_API_URL || '/api/v1').replace(/\/$/, '');
+function normaliseApiBase(configured?: string): string {
+  const value = (configured || '/api/v1').trim().replace(/\/+$/, '');
+  if (!value) return '/api/v1';
+  if (/\/api\/v1$/i.test(value)) return value;
+  if (/\/api$/i.test(value)) return `${value}/v1`;
+  return `${value}/api/v1`;
+}
+
+const API = normaliseApiBase(import.meta.env.VITE_API_URL);
 
 type User = {
   id: number;
@@ -55,6 +63,16 @@ type Dashboard = {
 };
 
 type SearchMode = 'web' | 'internal';
+
+type AiStatus = {
+  bedrock_configured: boolean;
+  internal_search_enabled: boolean;
+  internal_search_reason?: string | null;
+  web_search_enabled: boolean;
+  web_search_reason?: string | null;
+  agents_enabled: boolean;
+  agents_reason?: string | null;
+};
 type Section = 'dashboard' | 'procura' | 'agents' | 'team' | 'settings';
 
 type Agent = {
@@ -69,7 +87,7 @@ const AGENTS: Agent[] = [
   {
     id: 'property-discovery',
     name: 'Agente de Descoberta',
-    description: 'Identifica oportunidades imobiliárias em fontes autorizadas.',
+    description: 'Descobre oportunidades imobiliárias em fontes públicas autorizadas.',
     purpose: 'Descoberta de imóveis',
     icon: Search,
   },
@@ -89,9 +107,9 @@ const AGENTS: Agent[] = [
   },
   {
     id: 'owner-intelligence',
-    name: 'Agente de Proprietários',
-    description: 'Estrutura informação pública e validada sobre anúncios e contactos.',
-    purpose: 'Informação de proprietários',
+    name: 'Agente de Informação Pública',
+    description: 'Analisa evidência pública fornecida sobre anúncios, sem inferir a identidade de proprietários.',
+    purpose: 'Análise de anúncios',
     icon: UserSearch,
   },
   {
@@ -122,11 +140,18 @@ const DEFAULT_BRANDING: Branding = {
 async function readResponse<T>(response: Response): Promise<T> {
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('application/json')) {
+    if (response.status === 404) {
+      throw new Error(`A API respondeu 404. URL base utilizada: ${API}. Confirme se o backend foi atualizado e se VITE_API_URL aponta para a API, não para o alojamento estático.`);
+    }
     throw new Error(`Resposta inesperada do servidor (${response.status}). Confirme VITE_API_URL e o backend.`);
   }
   const payload = await response.json();
   if (!response.ok) {
-    throw new Error(payload?.detail || payload?.message || `Erro HTTP ${response.status}`);
+    const detail = payload?.detail || payload?.message;
+    if (response.status === 404 && (!detail || detail === 'Not Found')) {
+      throw new Error(`A rota não existe na versão da API em execução (${API}). O backend precisa de ser publicado com as rotas de Procura IA e Agentes IA.`);
+    }
+    throw new Error(detail || `Erro HTTP ${response.status}`);
   }
   return payload as T;
 }
@@ -163,6 +188,8 @@ export default function App() {
   const [report, setReport] = useState('');
   const [searchBusy, setSearchBusy] = useState(false);
   const [searchError, setSearchError] = useState('');
+  const [aiStatus, setAiStatus] = useState<AiStatus | null>(null);
+  const [aiStatusError, setAiStatusError] = useState('');
 
   const [agentBusy, setAgentBusy] = useState<string | null>(null);
   const [agentResults, setAgentResults] = useState<Record<string, string>>({});
@@ -301,6 +328,22 @@ export default function App() {
 
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setAiStatus(null);
+      setAiStatusError('');
+      return;
+    }
+    let active = true;
+    apiFetch('/ai/status')
+      .then(response => readResponse<AiStatus>(response))
+      .then(status => { if (active) setAiStatus(status); })
+      .catch(error => {
+        if (active) setAiStatusError(error instanceof Error ? error.message : 'Não foi possível verificar a configuração de IA.');
+      });
+    return () => { active = false; };
+  }, [apiFetch, user]);
 
   useEffect(() => {
     document.title = `${branding.product_name} | ${branding.customer_name}`;
@@ -732,6 +775,19 @@ export default function App() {
             <div className="panelhead">
               <div><h2><Search size={19} /> Pesquisa imobiliária</h2><p>Pesquise oportunidades na web ou na informação interna da plataforma.</p></div>
             </div>
+            <div className="ai-capability" role="status">
+              <span><b>Pesquisa interna:</b> {aiStatus ? (aiStatus.internal_search_enabled ? 'disponível' : 'indisponível') : 'a verificar'}</span>
+              <span>
+                <b>Pesquisa Web:</b> {aiStatus ? (aiStatus.web_search_enabled ? 'disponível' : 'indisponível') : 'a verificar'}
+              </span>
+              {aiStatus && searchMode === 'internal' && !aiStatus.internal_search_enabled && aiStatus.internal_search_reason && (
+                <small>{aiStatus.internal_search_reason}</small>
+              )}
+              {aiStatus && searchMode === 'web' && !aiStatus.web_search_enabled && aiStatus.web_search_reason && (
+                <small>{aiStatus.web_search_reason}</small>
+              )}
+              {aiStatusError && <small>{aiStatusError}</small>}
+            </div>
             <div className="mode-switch" role="group" aria-label="Origem da pesquisa">
               <button type="button" className={searchMode === 'web' ? 'mode-option selected' : 'mode-option'} onClick={() => setSearchMode('web')}>
                 <Globe2 size={17} /> Pesquisa Web
@@ -743,7 +799,7 @@ export default function App() {
             <form className="searchrow" onSubmit={runSearch}>
               <input value={query} onChange={event => setQuery(event.target.value)}
                 placeholder="Ex.: apartamentos T2 em Lisboa até 350.000 €" />
-              <button disabled={searchBusy || !query.trim()} type="submit">
+              <button disabled={searchBusy || !query.trim() || (searchMode === 'web' && aiStatus !== null && !aiStatus.web_search_enabled) || (searchMode === 'internal' && aiStatus !== null && !aiStatus.internal_search_enabled)} type="submit">
                 {searchBusy ? <><LoaderCircle className="spin" size={16} /> A pesquisar…</> : <><Search size={16} /> Procurar</>}
               </button>
             </form>
@@ -759,6 +815,12 @@ export default function App() {
               <div className="panelhead">
                 <div><h2><Bot size={19} /> Os seis agentes da plataforma</h2><p>Execute tarefas especializadas. Os resultados ficam visíveis para revisão humana.</p></div>
               </div>
+              {aiStatus && !aiStatus.agents_enabled && (
+                <div className="auth-error">
+                  {aiStatus.agents_reason || 'Os agentes necessitam de acesso IAM ao Amazon Bedrock na ECS Task Role.'}
+                </div>
+              )}
+              {aiStatusError && <div className="auth-error">{aiStatusError}</div>}
               {agentError && <div className="auth-error">{agentError}</div>}
               <div className="agent-input">
                 <label htmlFor="agent-context">Contexto ou dados para os agentes</label>
@@ -782,7 +844,7 @@ export default function App() {
                       <h3>{agent.name}</h3>
                       <p>{agent.description}</p>
                       <small>{agent.purpose}</small>
-                      <button disabled={!!agentBusy} onClick={() => void runAgent(agent)}>
+                      <button disabled={!!agentBusy || (aiStatus !== null && !aiStatus.agents_enabled)} onClick={() => void runAgent(agent)}>
                         {running ? <><LoaderCircle className="spin" size={15} /> A executar…</> : <><Play size={15} /> Executar agente</>}
                       </button>
                       {agentResults[agent.id] && <pre className="report agent-result">{agentResults[agent.id]}</pre>}

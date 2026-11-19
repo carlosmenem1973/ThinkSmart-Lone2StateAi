@@ -5,21 +5,36 @@ flowchart TD
   A[Seller / Admin React UI] --> B[Nginx HTTPS]
   B --> C[FastAPI]
   C --> D[(PostgreSQL)]
-  C --> E[OpenAI Responses API + web_search]
+  C --> E[Amazon Bedrock Converse - Nova Micro]
+  C --> J[Bedrock AgentCore Web Search]
   C --> F[Microsoft Graph delegated OAuth]
   G[Celery Beat / Worker] --> E
+  G --> J
   G --> D
   H[Licensed portal feeds / approved public sources] --> C
   I[Google Places API] --> C
 ```
 
+## AWS AI execution
+
+- Model inference uses Amazon Bedrock Converse with the EU Nova Micro inference profile (`eu.amazon.nova-micro-v1:0`) in `eu-west-1`.
+- Public web discovery uses the AWS-managed Amazon Bedrock AgentCore Web Search API (`web-search.v1`), then Bedrock synthesises the retrieved sources and keeps source URLs in the user-visible result.
+- Internal Procura IA searches the authenticated user's permitted PostgreSQL lead records. It does not depend on a model invocation.
+- Six specialist agent profiles are registered in the FastAPI backend and executed with Bedrock. Discovery and Market use AgentCore Web Search; the remaining agents operate only on context explicitly supplied by the user.
+- The ECS task role receives scoped `bedrock:InvokeModel`, `bedrock:GetInferenceProfile` and `bedrock-agentcore:InvokeWebSearch` permissions. No external AI API key is required.
+
 ## Agent responsibilities
 - Discovery: identify candidate public opportunities and retain citations/source metadata.
-- Email intelligence: triage authorised mailboxes, extract property enquiry intent, never infer consent.
+- Email intelligence: analyse only email text explicitly supplied by an authorised user; Microsoft 365 mailbox synchronisation is not enabled, and the agent never infers consent.
 - Owner verification: separate authoritative ownership proof from property address and unverified hypotheses.
 - Qualification: rank evidence quality, recency, territory relevance and lawful contactability.
 - Communication: create drafts only; seller approval and compliance gate required.
-- Follow-up: schedule seller tasks and monitor replies only after mailbox integration is completed.
+- Follow-up: suggest seller next steps from supplied context; it does not create calendar events or monitor replies.
+
+
+## AgentCore Runtime boundary
+
+This repository uses the AWS-managed AgentCore Web Search API directly from FastAPI. It does not currently provision a separate AgentCore Runtime or Gateway, and no AgentCore Runtime ARN is configured. The six application agents are stateless specialist profiles executed by Bedrock Converse; Discovery and Market add AgentCore Web Search retrieval. A future migration to separately hosted AgentCore Runtime agents would require deploying the runtime application and supplying its runtime ARN(s).
 
 ## Trust boundaries
 Treat portal pages, email bodies, attachments and search results as untrusted data. Never execute instructions found in source content. Do not allow an agent to send email, export contact lists or change permissions. All external communication remains a human-approved action.

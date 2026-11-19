@@ -22,7 +22,7 @@ The ALB origin uses HTTP only until an API-origin ACM certificate and hostname a
 - OpenTofu >= 1.10.0.
 - Docker and a GitLab Runner that supports privileged Docker-in-Docker for image builds.
 - A GitLab project containing this repository.
-- An OpenAI API key.
+- Amazon Bedrock access to the EU Nova Micro inference profile and Amazon Bedrock AgentCore Web Search in `eu-west-1`.
 - A Microsoft Entra application registration for Microsoft Graph mailbox access (the mailbox integration must be completed separately).
 
 Default region: `eu-west-1` (Ireland). CloudFront WAF resources are created through an aliased provider in `us-east-1`, as required by AWS.
@@ -120,7 +120,7 @@ Create these project/group CI/CD variables. Mark credentials as **masked** and *
 | `GITLAB_OIDC_SUBJECT` | Exact `project_path:...:ref_type:branch:ref:main` subject |
 | `AWS_ROLE_ARN_DEV` | Development role ARN from tofu output |
 | `AWS_ROLE_ARN_PROD` | Production role ARN from tofu output |
-| `OPENAI_API_KEY_DEV` / `OPENAI_API_KEY_PROD` | OpenAI API keys |
+| `AWS_ROLE_ARN_DEV` / `AWS_ROLE_ARN_PROD` | GitLab OIDC deployment roles; ECS uses its task role for Bedrock/AgentCore calls |
 | `SECRET_KEY_DEV` / `SECRET_KEY_PROD` | Separate random application signing secrets |
 | `BOOTSTRAP_ADMIN_EMAIL_DEV` / `..._PROD` | Initial administrator email; remove after bootstrap |
 | `BOOTSTRAP_ADMIN_PASSWORD_DEV` / `..._PROD` | Initial administrator password (16+ chars, upper/lower/digit); remove after bootstrap |
@@ -175,7 +175,7 @@ The public frontend currently uses the CloudFront-generated hostname. To use a b
 
 - `DATABASE_URL` (RDS PostgreSQL, TLS required)
 - `REDIS_URL` (ElastiCache TLS endpoint)
-- `OPENAI_API_KEY` and `SECRET_KEY`
+- `SECRET_KEY`; Bedrock model and AgentCore Web Search access are granted through the ECS task role, not API keys
 - Microsoft tenant, client ID and client secret
 - Optional Google Maps API key
 

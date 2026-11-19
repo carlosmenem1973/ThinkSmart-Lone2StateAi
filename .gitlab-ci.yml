@@ -33,6 +33,28 @@ validate_infrastructure:
     - tofu -chdir=infra/env/prod init -backend=false
     - tofu -chdir=infra/env/prod validate
 
+validate_frontend:
+  stage: validate
+  image: node:22-alpine
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+  script:
+    - cd frontend
+    - npm ci --no-audit --no-fund
+    - npm run build
+
+validate_backend_syntax:
+  stage: validate
+  image: python:3.12-slim
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+  script:
+    - python -m pip install --no-cache-dir -r backend/requirements.txt
+    - python -m compileall -q backend/app
+    - PYTHONPATH=backend python -c "from app.main import app; from app.agents.registry import AGENTS; from app.services.ai import bedrock_runtime_client, agentcore_client; assert len(AGENTS) == 6; assert 'Converse' in bedrock_runtime_client().meta.service_model.operation_names; assert 'InvokeWebSearch' in agentcore_client().meta.service_model.operation_names; print('FastAPI, six agents, Bedrock Converse and AgentCore Web Search imports OK')"
+
 .deploy_environment:
   image: docker:27.5.1
   services:
@@ -94,7 +116,6 @@ validate_infrastructure:
 
       # Populate Secrets Manager only after RDS and Redis endpoints exist.
       export TF_DIR AWS_REGION
-      export OPENAI_API_KEY="$ENV_OPENAI_API_KEY"
       export SECRET_KEY="$ENV_SECRET_KEY"
       export BOOTSTRAP_ADMIN_EMAIL="${ENV_BOOTSTRAP_ADMIN_EMAIL:-}"
       export BOOTSTRAP_ADMIN_PASSWORD="${ENV_BOOTSTRAP_ADMIN_PASSWORD:-}"
@@ -133,7 +154,6 @@ deploy_dev:
   variables:
     TARGET_ENV: "dev"
     CI_AWS_ROLE_ARN: "$AWS_ROLE_ARN_DEV"
-    ENV_OPENAI_API_KEY: "$OPENAI_API_KEY_DEV"
     ENV_SECRET_KEY: "$SECRET_KEY_DEV"
     ENV_BOOTSTRAP_ADMIN_EMAIL: "$BOOTSTRAP_ADMIN_EMAIL_DEV"
     ENV_BOOTSTRAP_ADMIN_PASSWORD: "$BOOTSTRAP_ADMIN_PASSWORD_DEV"
@@ -157,7 +177,6 @@ deploy_prod:
   variables:
     TARGET_ENV: "prod"
     CI_AWS_ROLE_ARN: "$AWS_ROLE_ARN_PROD"
-    ENV_OPENAI_API_KEY: "$OPENAI_API_KEY_PROD"
     ENV_SECRET_KEY: "$SECRET_KEY_PROD"
     ENV_BOOTSTRAP_ADMIN_EMAIL: "$BOOTSTRAP_ADMIN_EMAIL_PROD"
     ENV_BOOTSTRAP_ADMIN_PASSWORD: "$BOOTSTRAP_ADMIN_PASSWORD_PROD"
