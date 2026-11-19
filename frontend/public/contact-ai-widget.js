@@ -55,6 +55,7 @@
     event.preventDefault();
     const message = input.value.trim();
     if (!message) return;
+    const channel = input.dataset.channel === "voice" ? "voice" : "text";
     submit.disabled = true; status.textContent = "A enviar…";
     addBubble(message, "visitor"); input.value = ""; input.dataset.channel = "text";
     try {
