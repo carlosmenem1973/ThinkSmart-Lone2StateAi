@@ -343,6 +343,7 @@ def ai_status(user: User = Depends(get_business_user)):
         "model": settings.openai_model,
         "api_key_configured": key_configured,
         "internal_search_enabled": can_run_ai,
+        "internal_search_reason": access_reason,
         "web_search_enabled": web_ready,
         "agents_enabled": agents_ready,
         "web_search_reason": (
