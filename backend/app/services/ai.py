@@ -121,11 +121,13 @@ def search_web(query: str, *, max_results: int = 8) -> list[dict[str, Any]]:
         snippet = (item.get("text") or "").strip()
         if not url or not snippet:
             continue
+        published = item.get("publishedAt")
+        published_at = published.isoformat() if hasattr(published, "isoformat") else str(published) if published else None
         results.append({
             "title": title[:500],
             "url": url[:2000],
             "text": snippet[:3500],
-            "published_at": item.get("publishedAt").isoformat() if item.get("publishedAt") else None,
+            "published_at": published_at,
         })
     return results
 
