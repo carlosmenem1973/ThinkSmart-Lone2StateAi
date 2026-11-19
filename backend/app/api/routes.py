@@ -434,6 +434,32 @@ async def run_research(
     db.commit()
     return result
 
+ 
+@router.post("/research/visual-analysis")
+async def analyse_research_image(
+    request: Request,
+    user: User = Depends(get_business_user),
+):
+    """Analyse a real listing photograph supplied by the listing preview; never generate images."""
+    require_write_access(user)
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Corpo JSON inválido.") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="O corpo tem de ser um objeto JSON.")
+    image_url = str(body.get("image_url") or "").strip()
+    context = str(body.get("context") or "").strip()
+    if not image_url or len(image_url) > 2000:
+        raise HTTPException(status_code=422, detail="Indique um URL de fotografia válido.")
+    if len(context) > 1000:
+        raise HTTPException(status_code=413, detail="O contexto excede 1.000 caracteres.")
+    try:
+        from app.services.property_media import analyse_property_image
+        return await asyncio.to_thread(analyse_property_image, image_url, context)
+    except AIUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
 
 @router.get("/agents")
 def list_agents(_user: User = Depends(get_business_user)):
