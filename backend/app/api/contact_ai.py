@@ -62,12 +62,22 @@ def website_chat(payload: ChatInput, db: Session = Depends(get_db)):
     # it still answers website questions; outbound follow-up remains a human-approved draft.
     if not config.enabled:
         answer = "Obrigado pela sua mensagem. A equipa ThinkSmart AI irá analisar o seu pedido."
+        delivery_status = "delivered"
+    elif config.mode == "approval":
+        try:
+            suggestion = _reply(history, payload.message)
+        except AIUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        db.add(ContactMessage(conversation_id=row.id, role="assistant", content=suggestion, delivery_status="draft"))
+        answer = "Obrigado pelo seu contacto. Registámos a sua mensagem e a nossa equipa irá responder assim que possível."
+        delivery_status = "delivered"
     else:
         try:
             answer = _reply(history, payload.message)
         except AIUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-    db.add(ContactMessage(conversation_id=row.id, role="assistant", content=answer, delivery_status="delivered"))
+        delivery_status = "delivered"
+    db.add(ContactMessage(conversation_id=row.id, role="assistant", content=answer, delivery_status=delivery_status))
     db.commit()
     return {"conversation_id": row.id, "reply": answer, "mode": config.mode if config.enabled else "disabled"}
 
