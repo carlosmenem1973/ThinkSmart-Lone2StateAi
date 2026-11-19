@@ -9,6 +9,6 @@ def daily_research():
     result=research_web(query)
     db=SessionLocal()
     try:
-        db.add(AuditLog(action="scheduled.research.completed",entity_type="research",entity_id=result.get("response_id","unknown"),details={"query":query,"report":result.get("text","")[:12000]})); db.commit()
+        db.add(AuditLog(action="scheduled.research.completed",entity_type="research",entity_id=result.get("response_id") or "agentcore-web-search",details={"query":query,"report":result.get("text","")[:12000]})); db.commit()
     finally: db.close()
-    return {"response_id":result.get("response_id"),"report":result.get("text","")}
+    return {"response_id":result.get("response_id") or "agentcore-web-search","report":result.get("text","")}
