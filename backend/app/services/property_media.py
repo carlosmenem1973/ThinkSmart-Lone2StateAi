@@ -85,7 +85,7 @@ def first_text(*values):
 def extract_property_preview(url: str, title: str, snippet: str) -> dict:
     item = {
         "title": title[:300], "url": url, "description": snippet[:1200],
-        "image_url": None, "price": None, "currency": None, "address": None,
+        "image_url": None, "image_urls": [], "price": None, "currency": None, "address": None,
         "latitude": None, "longitude": None, "property_type": None,
         "source_name": urlparse(url).hostname or "Fonte externa",
         "image_attribution_url": url,
@@ -100,12 +100,19 @@ def extract_property_preview(url: str, title: str, snippet: str) -> dict:
         twitter_image = soup.find("meta", attrs={"name": "twitter:image"})
         item["title"] = first_text(og_title.get("content") if og_title else None, soup.title.string if soup.title and soup.title.string else None, title)[:300]
         item["description"] = first_text(og_description.get("content") if og_description else None, snippet)[:1200]
-        raw_image = first_text(og_image.get("content") if og_image else None, twitter_image.get("content") if twitter_image else None)
-        if raw_image:
+        image_candidates = []
+        for meta in soup.find_all("meta", property="og:image") + soup.find_all("meta", attrs={"name": "twitter:image"}):
+            candidate = meta.get("content")
+            if candidate:
+                image_candidates.append(candidate)
+        for raw_image in image_candidates:
             try:
-                item["image_url"] = public_url(urljoin(final_url, raw_image))
+                safe_image = public_url(urljoin(final_url, raw_image))
+                if safe_image not in item["image_urls"]:
+                    item["image_urls"].append(safe_image)
             except ValueError:
                 pass
+        item["image_url"] = item["image_urls"][0] if item["image_urls"] else None
         for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
             raw = script.string or script.get_text()
             if not raw or len(raw) > 500_000:
@@ -140,15 +147,21 @@ def extract_property_preview(url: str, title: str, snippet: str) -> dict:
                     item["longitude"] = item["longitude"] or (float(geo.get("longitude")) if geo.get("longitude") is not None else None)
                 except (TypeError, ValueError):
                     pass
-                if not item["image_url"]:
-                    images = node.get("image")
-                    if isinstance(images, str):
-                        images = [images]
-                    if isinstance(images, list) and images:
+                images = node.get("image")
+                if isinstance(images, (str, dict)):
+                    images = [images]
+                if isinstance(images, list):
+                    for image in images:
+                        raw = image.get("url") or image.get("contentUrl") if isinstance(image, dict) else image
+                        if not isinstance(raw, str):
+                            continue
                         try:
-                            item["image_url"] = public_url(urljoin(final_url, str(images[0])))
+                            safe_image = public_url(urljoin(final_url, raw))
+                            if safe_image not in item["image_urls"]:
+                                item["image_urls"].append(safe_image)
                         except ValueError:
                             pass
+                    item["image_url"] = item["image_urls"][0] if item["image_urls"] else None
     except (httpx.HTTPError, OSError, ValueError, TypeError):
         pass
     return item
