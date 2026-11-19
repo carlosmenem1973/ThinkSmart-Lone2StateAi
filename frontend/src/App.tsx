@@ -69,6 +69,7 @@ type AiStatus = {
   model: string;
   api_key_configured: boolean;
   internal_search_enabled: boolean;
+  internal_search_reason?: string | null;
   web_search_enabled: boolean;
   agents_enabled: boolean;
   web_search_reason?: string | null;
@@ -777,11 +778,14 @@ export default function App() {
               <div><h2><Search size={19} /> Pesquisa imobiliária</h2><p>Pesquise oportunidades na web ou na informação interna da plataforma.</p></div>
             </div>
             <div className="ai-capability" role="status">
-              <span><b>Pesquisa interna:</b> disponível</span>
+              <span><b>Pesquisa interna:</b> {aiStatus ? (aiStatus.internal_search_enabled ? 'disponível' : 'indisponível') : 'a verificar'}</span>
               <span>
                 <b>Pesquisa Web:</b> {aiStatus ? (aiStatus.web_search_enabled ? 'disponível' : 'indisponível') : 'a verificar'}
               </span>
-              {aiStatus && !aiStatus.web_search_enabled && aiStatus.web_search_reason && (
+              {aiStatus && searchMode === 'internal' && !aiStatus.internal_search_enabled && aiStatus.internal_search_reason && (
+                <small>{aiStatus.internal_search_reason}</small>
+              )}
+              {aiStatus && searchMode === 'web' && !aiStatus.web_search_enabled && aiStatus.web_search_reason && (
                 <small>{aiStatus.web_search_reason}</small>
               )}
               {aiStatusError && <small>{aiStatusError}</small>}
@@ -797,7 +801,7 @@ export default function App() {
             <form className="searchrow" onSubmit={runSearch}>
               <input value={query} onChange={event => setQuery(event.target.value)}
                 placeholder="Ex.: apartamentos T2 em Lisboa até 350.000 €" />
-              <button disabled={searchBusy || !query.trim() || (searchMode === 'web' && aiStatus !== null && !aiStatus.web_search_enabled)} type="submit">
+              <button disabled={searchBusy || !query.trim() || (searchMode === 'web' && aiStatus !== null && !aiStatus.web_search_enabled) || (searchMode === 'internal' && aiStatus !== null && !aiStatus.internal_search_enabled)} type="submit">
                 {searchBusy ? <><LoaderCircle className="spin" size={16} /> A pesquisar…</> : <><Search size={16} /> Procurar</>}
               </button>
             </form>
