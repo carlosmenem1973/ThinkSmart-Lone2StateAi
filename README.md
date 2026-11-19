@@ -1,6 +1,6 @@
 # ThinkSmart-Lone2StateAi
 
-AI-assisted real-estate lead research and seller CRM for Portugal. The application includes FastAPI, PostgreSQL, Redis/Celery, OpenAI web research, individual authentication, role-scoped lead CRUD, human-approved outreach drafts, follow-up records and a React dashboard.
+AI-assisted real-estate lead research and seller CRM for Portugal. The application includes FastAPI, PostgreSQL, Redis/Celery, Amazon Bedrock AI research, individual authentication, role-scoped lead CRUD, human-approved outreach drafts, follow-up records and a React dashboard.
 
 ## Important implementation boundary
 
@@ -12,7 +12,7 @@ Authentication is now implemented in the application: individual email/password 
 - Ubuntu Server 24.04 LTS or Docker Desktop for local development
 - Docker Engine + Docker Compose plugin
 - AWS account, domain (optional), and a GitLab project/runner for the AWS deployment
-- OpenAI API key with Responses API web search access
+- Amazon Bedrock model access and Bedrock AgentCore Web Search access in eu-west-1
 - Microsoft Entra app registration for delegated OAuth
 
 ## Quick start (development / initial test)
@@ -20,7 +20,7 @@ Authentication is now implemented in the application: individual email/password 
 cp .env.example .env
 # Edit .env. Generate strong secrets:
 openssl rand -hex 32
-# Set POSTGRES_PASSWORD, REDIS_PASSWORD, SECRET_KEY, OPENAI_API_KEY
+# Set POSTGRES_PASSWORD, REDIS_PASSWORD and SECRET_KEY; configure AWS credentials for Bedrock/AgentCore
 # Set BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD (minimum 16 chars)
 # Set FRONTEND_ORIGIN=http://localhost:5173 and COOKIE_SECURE=false for local HTTP development
 # Set Microsoft values only when configuring Entra.
@@ -53,16 +53,19 @@ Microsoft mailbox synchronisation is not enabled in this release. When implement
 
 The six agent IDs are `property-discovery`, `market-analyst`, `lead-qualifier`, `owner-intelligence`, `email-intelligence` and `follow-up-assistant`. All agent output is returned for human review; agents do not send email or contact owners. The email agent only analyses text explicitly supplied by an authorised user; Microsoft 365 mailbox synchronisation is not enabled.
 
-`GET /api/v1/ai/status` reports whether the OpenAI key, Web Search, internal search and agents are available. Internal search queries only the leads visible to the signed-in user and does not require an OpenAI key. Web search and agent execution require `OPENAI_API_KEY`; Web Search additionally requires `OPENAI_WEB_SEARCH_ENABLED=true`. The Agents SDK is explicitly configured from the same Pydantic settings as the Responses API so local `.env` and ECS Secrets Manager configurations work consistently. Agent tracing is disabled to avoid exporting user-supplied CRM/email content.
+`GET /api/v1/ai/status` reports Bedrock model configuration and availability of Web Search, internal search and agents. Internal search queries only the leads visible to the signed-in user and does not need model invocation. Web research uses the AWS-managed AgentCore Web Search API and Bedrock Converse synthesises the results. No external AI API key is required: the ECS task role uses IAM permissions for Bedrock and AgentCore. For local development, configure AWS credentials through the normal AWS SDK credential chain.
 
 For **AWS Amplify Hosting**, set the build environment variable `VITE_API_URL` to the FastAPI API origin, for example `https://api.example.pt`. The frontend automatically appends `/api/v1` when it is not already present. The Amplify build now fails early when this variable is missing, instead of publishing a frontend that sends API requests back to the static hosting origin.
 
 For the **OpenTofu CloudFront/S3 deployment**, the frontend can keep the default relative API base `/api/v1`, because the distribution routes `/api/*` to the ALB. Do not set `VITE_API_URL` to the frontend hostname in this deployment.
 
-After deployment, authenticate and check `GET /api/v1/ai/status` and `GET /api/v1/agents`. If these endpoints still return 404, the backend version behind the selected environment has not yet been deployed. In this repository, DEV deployment runs automatically from `main`; the `deploy_prod` GitLab job is manual and must be run to update Production. Also confirm the matching environment's Secrets Manager secret contains `OPENAI_API_KEY` and that `OPENAI_WEB_SEARCH_ENABLED` is true for Web Search.
+After deployment, authenticate and check `GET /api/v1/ai/status` and `GET /api/v1/agents`. If these endpoints still return 404, the backend version behind the selected environment has not yet been deployed. In this repository, DEV deployment runs automatically from `main`; the `deploy_prod` GitLab job is manual and must be run to update Production. Also confirm the ECS task role has the Bedrock model and AgentCore Web Search permissions. OpenTofu configures the EU Nova Micro inference profile and Web Search API for `eu-west-1`.
 
-## OpenAI
-The discovery endpoint uses the Responses API with the hosted `web_search` tool. The model is configurable through `OPENAI_MODEL`. Confirm model availability and project limits in your OpenAI account before deployment. Search output includes source URLs/citations in the model text where available. It is not a guarantee of exhaustive web coverage.
+## Amazon Bedrock
+
+The application invokes Amazon Nova Micro through the Amazon Bedrock Converse API using the EU inference profile `eu.amazon.nova-micro-v1:0`. Requests originate in `eu-west-1` and use the EU profile. Public web research uses Amazon Bedrock AgentCore Web Search (`web-search.v1`), available in Europe (Ireland). The API then synthesises the search results with Bedrock and retains the source URLs in the report.
+
+The ECS task role receives scoped permissions for the Nova Micro inference profile and its EU destination models, plus `bedrock-agentcore:InvokeWebSearch` on the AWS-managed Web Search tool. Do not add provider API keys to Amplify variables or Secrets Manager. For local runs, use the AWS SDK default credential chain and an IAM identity with equivalent least-privilege permissions.
 
 ## API endpoints
 All business endpoints require `Authorization: Bearer <access_token>`. The refresh and logout endpoints use the HttpOnly refresh cookie plus same-origin validation. Public endpoints are limited to health and login.
