@@ -21,7 +21,9 @@ from app.models.entities import (
 from app.schemas.auth import ChangePasswordRequest, CreateUserRequest, LoginRequest, UserOut
 from app.schemas.leads import LeadCreate, LeadOut, LeadUpdate, FollowUpCreate
 from app.schemas.branding import BrandingUpdate
-from app.services.ai import research_web, draft_outreach
+from app.services.ai import research_web, draft_outreach, client as ai_client
+from app.agents.registry import AGENTS, AGENT_RUNNERS
+from agents import Runner
 
 router = APIRouter()
 
@@ -337,6 +339,61 @@ def run_research(query: str, user: User = Depends(get_business_user), db: Sessio
     audit(db, user, "research.executed", "research", result.get("response_id", "unknown"), {"query": query[:500]})
     db.commit()
     return result
+
+
+
+
+@router.get("/agents")
+def list_agents(_user: User = Depends(get_business_user)):
+    """List available specialist agents; no provider execution occurs on this endpoint."""
+    return {"items": [
+        {"id": agent_id, "name": spec["name"], "description": spec["description"], "purpose": spec["purpose"]}
+        for agent_id, spec in AGENTS.items()
+    ]}
+
+
+@router.post("/agents/{agent_id}/run")
+def execute_agent(agent_id: str, request: Request, user: User = Depends(get_business_user), db: Session = Depends(get_db)):
+    """Execute a registered agent with explicit user input and return a reviewable result."""
+    require_write_access(user)
+    if agent_id not in AGENT_RUNNERS:
+        raise HTTPException(status_code=404, detail="Agente não encontrado")
+    if ai_client is None:
+        raise HTTPException(status_code=503, detail="O serviço de IA não está configurado. Verifique OPENAI_API_KEY.")
+    try:
+        payload = request.json
+    except Exception:
+        payload = None
+    import asyncio
+    try:
+        body = asyncio.run(request.json()) if payload is None else payload
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    supplied = body.get("input") or body.get("query") or ""
+    # The email agent must only process text explicitly supplied by the signed-in user.
+    if agent_id == "email-intelligence" and not supplied:
+        raise HTTPException(status_code=400, detail="Forneça o texto do email autorizado para análise.")
+    if not supplied:
+        supplied = (
+            "Executa uma análise inicial de oportunidades imobiliárias em Portugal. "
+            "Usa apenas informação pública acessível e indica claramente fontes, lacunas e incerteza."
+        )
+    if len(str(supplied)) > 12000:
+        raise HTTPException(status_code=413, detail="O pedido excede o limite de 12.000 caracteres.")
+    try:
+        result = asyncio.run(Runner.run(AGENT_RUNNERS[agent_id], str(supplied)))
+        output = getattr(result, "final_output", None) or str(result)
+    except RuntimeError:
+        # FastAPI may execute this sync endpoint in a worker thread with an active
+        # event loop only in unusual test/runtime configurations.
+        raise HTTPException(status_code=503, detail="Não foi possível iniciar a execução do agente.")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Falha na execução do agente: {type(exc).__name__}") from exc
+    audit(db, user, "agent.executed", "agent", agent_id, {"input_length": len(str(supplied))})
+    db.commit()
+    return {"agent_id": agent_id, "status": "completed", "text": str(output), "requires_human_review": True}
 
 
 @router.post("/leads/{lead_id}/draft")
