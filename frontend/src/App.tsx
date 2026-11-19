@@ -138,6 +138,30 @@ const DEFAULT_BRANDING: Branding = {
   accent_color: '#16866C',
 };
 
+function describeApiDetail(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) {
+    const messages = value.map(describeApiDetail).filter(Boolean);
+    return messages.join('; ');
+  }
+  if (value && typeof value === 'object') {
+    const item = value as Record<string, unknown>;
+    if (typeof item.msg === 'string') {
+      const location = Array.isArray(item.loc) ? item.loc.map(String).join(' → ') : '';
+      return location ? `${location}: ${item.msg}` : item.msg;
+    }
+    for (const key of ['message', 'detail', 'error', 'reason']) {
+      if (item[key] !== undefined && item[key] !== value) {
+        const message = describeApiDetail(item[key]);
+        if (message) return message;
+      }
+    }
+    try { return JSON.stringify(value); } catch { return 'A API devolveu um erro não identificado.'; }
+  }
+  return '';
+}
+
 async function readResponse<T>(response: Response): Promise<T> {
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('application/json')) {
@@ -146,11 +170,16 @@ async function readResponse<T>(response: Response): Promise<T> {
     }
     throw new Error(`Resposta inesperada do servidor (${response.status}). Confirme VITE_API_URL e o backend.`);
   }
-  const payload = await response.json();
+  let payload: any;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error(`A API devolveu JSON inválido (HTTP ${response.status}).`);
+  }
   if (!response.ok) {
-    const detail = payload?.detail || payload?.message;
+    const detail = describeApiDetail(payload?.detail ?? payload?.message ?? payload?.error);
     if (response.status === 404 && (!detail || detail === 'Not Found')) {
-      throw new Error(`A rota não existe na versão da API em execução (${API}). O backend precisa de ser publicado com as rotas de Procura IA e Agentes IA.`);
+      throw new Error(`A rota não existe na versão da API em execução (${API}). Confirme se o backend publicado inclui as rotas de Procura IA e Agentes IA.`);
     }
     throw new Error(detail || `Erro HTTP ${response.status}`);
   }
