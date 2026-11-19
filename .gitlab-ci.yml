@@ -51,7 +51,9 @@ validate_backend_syntax:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH'
   script:
+    - python -m pip install --no-cache-dir -r backend/requirements.txt
     - python -m compileall -q backend/app
+    - PYTHONPATH=backend python -c "from app.main import app; from app.agents.registry import AGENTS; from app.services.ai import bedrock_runtime_client, agentcore_client; assert len(AGENTS) == 6; assert 'Converse' in bedrock_runtime_client().meta.service_model.operation_names; assert 'InvokeWebSearch' in agentcore_client().meta.service_model.operation_names; print('FastAPI, six agents, Bedrock Converse and AgentCore Web Search imports OK')"
 
 .deploy_environment:
   image: docker:27.5.1
