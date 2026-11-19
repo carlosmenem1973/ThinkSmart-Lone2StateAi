@@ -365,6 +365,7 @@ async def run_research(
     db: Session = Depends(get_db),
 ):
     """Run web research or search the signed-in user's permitted internal lead records."""
+    require_write_access(user)
     query = query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="Introduza uma pesquisa.")
