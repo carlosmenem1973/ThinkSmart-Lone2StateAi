@@ -49,6 +49,18 @@ The included Nginx configuration is an HTTP reverse proxy starter. For productio
 ## Microsoft 365 setup
 Microsoft mailbox synchronisation is not enabled in this release. When implementing it, create an Entra app registration, use delegated `User.Read` and `Mail.Read` scopes, bind OAuth state to the signed-in seller, and persist each seller's MSAL token cache encrypted. Do not grant tenant-wide application `Mail.Read` permissions without a separate security and mailbox-scoping review.
 
+## AI capabilities and frontend API URL
+
+The six agent IDs are `property-discovery`, `market-analyst`, `lead-qualifier`, `owner-intelligence`, `email-intelligence` and `follow-up-assistant`. All agent output is returned for human review; agents do not send email or contact owners. The email agent only analyses text explicitly supplied by an authorised user; Microsoft 365 mailbox synchronisation is not enabled.
+
+`GET /api/v1/ai/status` reports whether the OpenAI key, Web Search, internal search and agents are available. Internal search queries only the leads visible to the signed-in user and does not require an OpenAI key. Web search and agent execution require `OPENAI_API_KEY`; Web Search additionally requires `OPENAI_WEB_SEARCH_ENABLED=true`. The Agents SDK is explicitly configured from the same Pydantic settings as the Responses API so local `.env` and ECS Secrets Manager configurations work consistently. Agent tracing is disabled to avoid exporting user-supplied CRM/email content.
+
+For **AWS Amplify Hosting**, set the build environment variable `VITE_API_URL` to the FastAPI API origin, for example `https://api.example.pt`. The frontend automatically appends `/api/v1` when it is not already present. The Amplify build now fails early when this variable is missing, instead of publishing a frontend that sends API requests back to the static hosting origin.
+
+For the **OpenTofu CloudFront/S3 deployment**, the frontend can keep the default relative API base `/api/v1`, because the distribution routes `/api/*` to the ALB. Do not set `VITE_API_URL` to the frontend hostname in this deployment.
+
+After deployment, authenticate and check `GET /api/v1/ai/status` and `GET /api/v1/agents`. If these endpoints still return 404, the backend version behind the selected environment has not yet been deployed. In this repository, DEV deployment runs automatically from `main`; the `deploy_prod` GitLab job is manual and must be run to update Production. Also confirm the matching environment's Secrets Manager secret contains `OPENAI_API_KEY` and that `OPENAI_WEB_SEARCH_ENABLED` is true for Web Search.
+
 ## OpenAI
 The discovery endpoint uses the Responses API with the hosted `web_search` tool. The model is configurable through `OPENAI_MODEL`. Confirm model availability and project limits in your OpenAI account before deployment. Search output includes source URLs/citations in the model text where available. It is not a guarantee of exhaustive web coverage.
 
@@ -70,7 +82,10 @@ All business endpoints require `Authorization: Bearer <access_token>`. The refre
 - `GET /api/v1/leads`
 - `POST /api/v1/leads`
 - `PATCH /api/v1/leads/{id}`
-- `POST /api/v1/research?query=...`
+- `GET /api/v1/ai/status` (authenticated, non-sensitive provider/capability status)
+- `GET /api/v1/agents` (authenticated list of six specialist agents)
+- `POST /api/v1/agents/{agent_id}/run` (authenticated execution; JSON body: `{"input":"context or data to analyse"}`)
+- `POST /api/v1/research?query=...&source=web|internal` (Web research or role-scoped internal lead search)
 - `POST /api/v1/leads/{id}/draft`
 - `POST /api/v1/drafts/{id}/approve`
 - `POST /api/v1/leads/{id}/followups`
