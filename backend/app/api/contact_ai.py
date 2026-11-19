@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 from pydantic import BaseModel, Field, EmailStr
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, desc
@@ -17,6 +18,7 @@ class ChatInput(BaseModel):
     name: str | None = Field(default=None, max_length=160)
     email: EmailStr | None = None
     consent_to_followup: bool = False
+    channel: Literal['text', 'voice'] = 'text'
 
 class SettingsInput(BaseModel):
     enabled: bool
@@ -54,7 +56,7 @@ def website_chat(payload: ChatInput, db: Session = Depends(get_db)):
         row.visitor_email = str(payload.email)
     row.consent_to_followup = bool(row.consent_to_followup or payload.consent_to_followup)
     row.last_message_at = datetime.now(timezone.utc)
-    db.add(ContactMessage(conversation_id=row.id, role="visitor", content=payload.message, delivery_status="received"))
+    db.add(ContactMessage(conversation_id=row.id, role="visitor", content=payload.message, delivery_status="received", metadata_json={"channel": payload.channel}))
     db.flush()
     config = _settings(db)
     history = db.scalars(select(ContactMessage).where(ContactMessage.conversation_id == row.id).order_by(ContactMessage.created_at)).all()
@@ -77,7 +79,7 @@ def website_chat(payload: ChatInput, db: Session = Depends(get_db)):
         except AIUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         delivery_status = "delivered"
-    db.add(ContactMessage(conversation_id=row.id, role="assistant", content=answer, delivery_status=delivery_status))
+    db.add(ContactMessage(conversation_id=row.id, role="assistant", content=answer, delivery_status=delivery_status, metadata_json={"channel": payload.channel, "voice_response": payload.channel == "voice"}))
     db.commit()
     return {"conversation_id": row.id, "reply": answer, "mode": config.mode if config.enabled else "disabled"}
 
@@ -141,3 +143,66 @@ def list_messages(conversation_id: int, user: User = Depends(get_business_user),
         raise HTTPException(status_code=404, detail="Conversation not found")
     rows = db.scalars(select(ContactMessage).where(ContactMessage.conversation_id == conversation_id).order_by(ContactMessage.created_at)).all()
     return [{"id": x.id, "role": x.role, "content": x.content, "delivery_status": x.delivery_status, "created_at": x.created_at} for x in rows]
+
+
+class DiscoverySettingsInput(BaseModel):
+    enabled: bool
+    query: str = Field(min_length=8, max_length=1000)
+    interval_minutes: int = Field(default=1440, ge=60, le=10080)
+
+
+@router.get("/discovery-settings")
+def get_discovery_settings(admin: User = Depends(require_admin_user), db: Session = Depends(get_db)):
+    row = _settings(db)
+    return {"enabled": row.search_enabled, "query": row.search_query,
+            "interval_minutes": row.search_interval_minutes, "last_search_at": row.last_search_at}
+
+
+@router.put("/discovery-settings")
+def update_discovery_settings(payload: DiscoverySettingsInput, admin: User = Depends(require_admin_user), db: Session = Depends(get_db)):
+    row = _settings(db)
+    row.search_enabled = payload.enabled
+    row.search_query = payload.query.strip()
+    row.search_interval_minutes = payload.interval_minutes
+    row.next_search_at = datetime.now(timezone.utc) if payload.enabled else None
+    row.updated_by = admin.id
+    db.add(AuditLog(actor_id=admin.id, action="property_discovery.settings_updated",
+                    entity_type="property_search", entity_id="1", details=payload.model_dump()))
+    db.commit()
+    return {"enabled": row.search_enabled, "query": row.search_query,
+            "interval_minutes": row.search_interval_minutes, "next_search_at": row.next_search_at}
+
+
+@router.post("/discovery/run")
+def run_discovery_now(user: User = Depends(get_business_user), db: Session = Depends(get_db)):
+    if user.role == UserRole.VIEWER:
+        raise HTTPException(status_code=403, detail="Viewer accounts cannot run property discovery")
+    config = _settings(db)
+    from app.services.ai import research_web
+    try:
+        result = research_web(config.search_query or "Oportunidades imobiliárias recentes em Portugal")
+    except AIUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Property discovery failed ({type(exc).__name__})") from exc
+    now = datetime.now(timezone.utc)
+    db.add(AuditLog(actor_id=user.id, action="property_discovery.manual_completed",
+                    entity_type="property_search", entity_id="manual",
+                    details={"query": config.search_query, "report": result.get("text", "")[:16000],
+                             "sources": result.get("sources", [])}))
+    config.last_search_at = now
+    if config.search_enabled:
+        config.next_search_at = now + timedelta(minutes=config.search_interval_minutes)
+    db.commit()
+    return {"status": "completed", "text": result.get("text", ""),
+            "sources": result.get("sources", []), "requires_human_review": True}
+
+
+@router.get("/discovery/runs")
+def list_discovery_runs(user: User = Depends(get_business_user), db: Session = Depends(get_db)):
+    if user.role == UserRole.VIEWER:
+        raise HTTPException(status_code=403, detail="Viewer accounts cannot view discovery runs")
+    rows = db.scalars(select(AuditLog).where(AuditLog.entity_type == "property_search")
+                      .order_by(desc(AuditLog.created_at)).limit(20)).all()
+    return [{"id": row.id, "action": row.action, "created_at": row.created_at,
+             "details": row.details} for row in rows]
