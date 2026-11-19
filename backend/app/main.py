@@ -4,7 +4,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.models import entities  # noqa: F401
+from app.models import contact_ai  # noqa: F401
 from app.api.routes import router
+from app.api.contact_ai import router as contact_ai_router
 
 
 app = FastAPI(
@@ -47,6 +49,7 @@ app.add_middleware(
 )
 
 app.include_router(router, prefix="/api/v1")
+app.include_router(contact_ai_router, prefix="/api/v1")
 
 
 @app.on_event("startup")

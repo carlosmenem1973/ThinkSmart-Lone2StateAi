@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     cognito_app_client_id: str = ""
     frontend_origin: str = "http://localhost:5173"
     bedrock_region: str = "eu-west-1"
-    bedrock_model_id: str = "eu.amazon.nova-micro-v1:0"
+    bedrock_model_id: str = "eu.amazon.nova-lite-v1:0"
     bedrock_web_search_enabled: bool = True
     bedrock_web_search_id: str = "web-search.v1"
     microsoft_tenant_id: str = "common"
