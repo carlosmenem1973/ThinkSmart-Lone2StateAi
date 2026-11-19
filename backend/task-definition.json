@@ -37,7 +37,11 @@
         },
         {
           "name": "BEDROCK_MODEL_ID",
-          "value": "eu.amazon.nova-micro-v1:0"
+          "value": "eu.amazon.nova-lite-v1:0"
+        },
+        {
+          "name": "BEDROCK_AGENTCORE_WEB_SEARCH_ID",
+          "value": "web-search.v1"
         },
         {
           "name": "BEDROCK_REGION",
