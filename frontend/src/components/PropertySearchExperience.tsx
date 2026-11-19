@@ -4,7 +4,7 @@ import './PropertySearchExperience.css';
 
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
 type Property = {
-  title: string; url: string; description?: string; image_url?: string | null;
+  title: string; url: string; description?: string; image_url?: string | null; image_urls?: string[];
   price?: string | null; currency?: string | null; address?: string | null;
   latitude?: number | null; longitude?: number | null; source_name?: string | null;
 };
@@ -86,7 +86,7 @@ export default function PropertySearchExperience({apiFetch,aiStatus,aiStatusErro
         <div className="property-view-switch"><button type="button" className={view==='grid'?'active':''} onClick={()=>setView('grid')}><LayoutGrid size={15}/> Grelha</button><button type="button" className={view==='map'?'active':''} onClick={()=>setView('map')}><MapIcon size={15}/> Mapa</button></div>
       </div>
       {view==='grid'&&<div className="property-grid">{properties.map((p,i)=><article className="property-card" key={p.url}>
-        <div className="property-photo">{p.image_url?<img src={p.image_url} alt={'Fotografia do anúncio: '+p.title} loading="lazy" referrerPolicy="no-referrer"/>:<div className="property-no-photo"><Images size={27}/><span>Fotografia não disponibilizada pela fonte</span></div>}<span className="property-index">#{i+1}</span></div>
+        <div className={(p.image_urls?.length||p.image_url)?'property-photo property-photo-gallery':'property-photo'}>{(p.image_urls?.length?p.image_urls:(p.image_url?[p.image_url]:[])).slice(0,4).map((image,index)=><img key={image} src={image} alt={'Fotografia '+(index+1)+' do anúncio: '+p.title} loading="lazy" referrerPolicy="no-referrer"/>)}{!(p.image_urls?.length||p.image_url)&&<div className="property-no-photo"><Images size={27}/><span>Fotografia não disponibilizada pela fonte</span></div>}<span className="property-index">#{i+1}</span></div>
         <div className="property-card-body"><div className="property-card-price">{formatPrice(p.price,p.currency)}</div><h3>{p.title}</h3><p>{p.address||p.description||'Consulte o anúncio original para mais detalhes.'}</p><small>{p.source_name||'Fonte pública'}</small>
           <div className="property-card-actions"><a href={p.url} target="_blank" rel="noreferrer"><ExternalLink size={14}/> Anúncio</a><button type="button" className={compare.includes(p.url)?'selected':''} onClick={()=>toggleCompare(p.url)} disabled={!compare.includes(p.url)&&compare.length>=3}><Scale size={14}/> Comparar</button></div>
           {p.image_url&&<button type="button" className="property-analyse" onClick={()=>void analyse(p)} disabled={analysing!==null}>{analysing===p.url?<><LoaderCircle className="spin" size={14}/> A analisar</>:<><Sparkles size={14}/> Analisar fotografia com IA</>}</button>}
