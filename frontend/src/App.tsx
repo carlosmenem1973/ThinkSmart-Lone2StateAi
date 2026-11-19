@@ -89,8 +89,8 @@ const AGENTS: Agent[] = [
   },
   {
     id: 'owner-intelligence',
-    name: 'Agente de Proprietários',
-    description: 'Estrutura informação pública e validada sobre anúncios e contactos.',
+    name: 'Agente de Informação Pública',
+    description: 'Estrutura informação pública validada sobre anúncios, sem inferir a identidade de proprietários.',
     purpose: 'Informação de proprietários',
     icon: UserSearch,
   },
@@ -796,7 +796,7 @@ export default function App() {
 
         {section === 'team' && (
           <>
-            {user.role === 'admin' ? (
+            {(user.role === 'admin' || user.role === 'super_admin') ? (
               <section className="panel">
                 <div className="panelhead"><div><h2><UserPlus size={19} /> Criar conta de vendedor</h2><p>Convide um membro da equipa para a plataforma.</p></div></div>
                 <form className="seller-form" onSubmit={createSeller}>
