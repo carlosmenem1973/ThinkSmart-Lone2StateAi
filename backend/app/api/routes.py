@@ -377,7 +377,7 @@ def run_research(
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Research provider failed: {type(exc).__name__}") from exc
 
-    audit(db, user, "research.executed", "research", result.get("response_id", "internal"), {
+    audit(db, user, "research.executed", "research", result.get("response_id") or "internal", {
         "query": query[:500], "source": source, "result_count": len(result.get("items", [])),
     })
     db.commit()
