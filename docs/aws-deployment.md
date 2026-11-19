@@ -22,7 +22,7 @@ The ALB origin uses HTTP only until an API-origin ACM certificate and hostname a
 - OpenTofu >= 1.10.0.
 - Docker and a GitLab Runner that supports privileged Docker-in-Docker for image builds.
 - A GitLab project containing this repository.
-- An OpenAI API key.
+- IAM permissions for Amazon Bedrock Nova Lite inference and AgentCore Web Search.
 - A Microsoft Entra application registration for Microsoft Graph mailbox access (the mailbox integration must be completed separately).
 
 Default region: `eu-west-1` (Ireland). CloudFront WAF resources are created through an aliased provider in `us-east-1`, as required by AWS.
@@ -120,7 +120,7 @@ Create these project/group CI/CD variables. Mark credentials as **masked** and *
 | `GITLAB_OIDC_SUBJECT` | Exact `project_path:...:ref_type:branch:ref:main` subject |
 | `AWS_ROLE_ARN_DEV` | Development role ARN from tofu output |
 | `AWS_ROLE_ARN_PROD` | Production role ARN from tofu output |
-| `OPENAI_API_KEY_DEV` / `OPENAI_API_KEY_PROD` | OpenAI API keys |
+| — | No AI API key is required; ECS uses its task role for Bedrock and AgentCore |
 | `SECRET_KEY_DEV` / `SECRET_KEY_PROD` | Separate random application signing secrets |
 | `BOOTSTRAP_ADMIN_EMAIL_DEV` / `..._PROD` | Initial administrator email; remove after bootstrap |
 | `BOOTSTRAP_ADMIN_PASSWORD_DEV` / `..._PROD` | Initial administrator password (16+ chars, upper/lower/digit); remove after bootstrap |
@@ -175,11 +175,11 @@ The public frontend currently uses the CloudFront-generated hostname. To use a b
 
 - `DATABASE_URL` (RDS PostgreSQL, TLS required)
 - `REDIS_URL` (ElastiCache TLS endpoint)
-- `OPENAI_API_KEY` and `SECRET_KEY`
+- `SECRET_KEY` (Bedrock access uses the ECS task role, not a stored API key)
 - Microsoft tenant, client ID and client secret
 - Optional Google Maps API key
 
-ECS injects these values through the **task execution role**, which has `secretsmanager:GetSecretValue` for this one application secret. The task role has no broad AWS permissions. The deployment sets the Microsoft redirect URI to `https://<cloudfront-domain>/api/v1/integrations/microsoft/callback`. After the first development deployment, copy the CloudFront domain from `tofu output -raw cloudfront_domain` and register that exact callback URL as a **Web** redirect URI in the Microsoft Entra app registration. The app currently requests delegated `User.Read` and `Mail.Read` scopes. Its callback does not yet persist an encrypted per-seller token cache; mailbox token persistence, per-seller consent/mapping, refresh and sync workers must be implemented and tested before real mailboxes are connected.
+ECS injects these values through the **task execution role**, which has `secretsmanager:GetSecretValue` for this one application secret. The ECS task role has narrowly scoped `bedrock:InvokeModel`, `bedrock:GetInferenceProfile`, and `bedrock-agentcore:InvokeWebSearch` permissions for the EU Nova Lite inference profile and managed Web Search tool. The deployment sets the Microsoft redirect URI to `https://<cloudfront-domain>/api/v1/integrations/microsoft/callback`. After the first development deployment, copy the CloudFront domain from `tofu output -raw cloudfront_domain` and register that exact callback URL as a **Web** redirect URI in the Microsoft Entra app registration. The app currently requests delegated `User.Read` and `Mail.Read` scopes. Its callback does not yet persist an encrypted per-seller token cache; mailbox token persistence, per-seller consent/mapping, refresh and sync workers must be implemented and tested before real mailboxes are connected.
 
 ## 10. Security controls included
 
