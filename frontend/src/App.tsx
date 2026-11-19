@@ -15,7 +15,15 @@ import {
   TrendingUp, UserSearch, ClipboardCheck, Menu, X,
 } from 'lucide-react';
 
-const API = (import.meta.env.VITE_API_URL || '/api/v1').replace(/\/$/, '');
+function normaliseApiBase(configured?: string): string {
+  const value = (configured || '/api/v1').trim().replace(/\/+$/, '');
+  if (!value) return '/api/v1';
+  if (/\/api\/v1$/i.test(value)) return value;
+  if (/\/api$/i.test(value)) return `${value}/v1`;
+  return `${value}/api/v1`;
+}
+
+const API = normaliseApiBase(import.meta.env.VITE_API_URL);
 
 type User = {
   id: number;
@@ -55,6 +63,17 @@ type Dashboard = {
 };
 
 type SearchMode = 'web' | 'internal';
+
+type AiStatus = {
+  provider: string;
+  model: string;
+  api_key_configured: boolean;
+  internal_search_enabled: boolean;
+  web_search_enabled: boolean;
+  agents_enabled: boolean;
+  web_search_reason?: string | null;
+  agents_reason?: string | null;
+};
 type Section = 'dashboard' | 'procura' | 'agents' | 'team' | 'settings';
 
 type Agent = {
@@ -163,6 +182,8 @@ export default function App() {
   const [report, setReport] = useState('');
   const [searchBusy, setSearchBusy] = useState(false);
   const [searchError, setSearchError] = useState('');
+  const [aiStatus, setAiStatus] = useState<AiStatus | null>(null);
+  const [aiStatusError, setAiStatusError] = useState('');
 
   const [agentBusy, setAgentBusy] = useState<string | null>(null);
   const [agentResults, setAgentResults] = useState<Record<string, string>>({});
@@ -301,6 +322,22 @@ export default function App() {
 
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setAiStatus(null);
+      setAiStatusError('');
+      return;
+    }
+    let active = true;
+    apiFetch('/ai/status')
+      .then(response => readResponse<AiStatus>(response))
+      .then(status => { if (active) setAiStatus(status); })
+      .catch(error => {
+        if (active) setAiStatusError(error instanceof Error ? error.message : 'Não foi possível verificar a configuração de IA.');
+      });
+    return () => { active = false; };
+  }, [apiFetch, user]);
 
   useEffect(() => {
     document.title = `${branding.product_name} | ${branding.customer_name}`;
@@ -732,6 +769,16 @@ export default function App() {
             <div className="panelhead">
               <div><h2><Search size={19} /> Pesquisa imobiliária</h2><p>Pesquise oportunidades na web ou na informação interna da plataforma.</p></div>
             </div>
+            <div className="ai-capability" role="status">
+              <span><b>Pesquisa interna:</b> disponível</span>
+              <span>
+                <b>Pesquisa Web:</b> {aiStatus ? (aiStatus.web_search_enabled ? 'disponível' : 'indisponível') : 'a verificar'}
+              </span>
+              {aiStatus && !aiStatus.web_search_enabled && aiStatus.web_search_reason && (
+                <small>{aiStatus.web_search_reason}</small>
+              )}
+              {aiStatusError && <small>{aiStatusError}</small>}
+            </div>
             <div className="mode-switch" role="group" aria-label="Origem da pesquisa">
               <button type="button" className={searchMode === 'web' ? 'mode-option selected' : 'mode-option'} onClick={() => setSearchMode('web')}>
                 <Globe2 size={17} /> Pesquisa Web
@@ -759,6 +806,12 @@ export default function App() {
               <div className="panelhead">
                 <div><h2><Bot size={19} /> Os seis agentes da plataforma</h2><p>Execute tarefas especializadas. Os resultados ficam visíveis para revisão humana.</p></div>
               </div>
+              {aiStatus && !aiStatus.agents_enabled && (
+                <div className="auth-error">
+                  {aiStatus.agents_reason || 'Os agentes precisam de uma chave OpenAI configurada no backend.'}
+                </div>
+              )}
+              {aiStatusError && <div className="auth-error">{aiStatusError}</div>}
               {agentError && <div className="auth-error">{agentError}</div>}
               <div className="agent-input">
                 <label htmlFor="agent-context">Contexto ou dados para os agentes</label>
