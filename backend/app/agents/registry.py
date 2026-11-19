@@ -4,10 +4,17 @@ These agents are deliberately self-contained and use the already configured Open
 model. Integrations that are not configured (mailbox and internal records) return a
 clear capability notice instead of pretending to have accessed private data.
 """
-from agents import Agent
+from agents import Agent, set_default_openai_key, set_tracing_disabled
 from app.core.config import settings
 
 MODEL = settings.openai_model
+
+# Settings reads .env files via pydantic, while the Agents SDK reads process
+# environment by default. Configure both execution paths from the same source.
+# Do not export user-provided CRM/email content through agent tracing.
+if settings.openai_api_key:
+    set_default_openai_key(settings.openai_api_key, use_for_tracing=False)
+set_tracing_disabled(True)
 
 AGENTS = {
     "property-discovery": {
@@ -44,7 +51,7 @@ AGENTS = {
         "description": "Estrutura informação pública e validada sobre anúncios imobiliários.",
         "purpose": "Informação sobre anúncios",
         "instructions": (
-            "Organiza apenas informação pública fornecida ou encontrada em fontes autorizadas sobre anúncios. "
+            "Organiza apenas informação pública sobre anúncios explicitamente fornecida pelo utilizador. "
             "Não identifiques proprietários sem evidência oficial, não infiras dados pessoais e assinala o que requer validação humana."
         ),
     },
