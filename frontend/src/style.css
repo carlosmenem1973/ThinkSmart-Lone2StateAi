@@ -39,3 +39,8 @@
   header h1{font-size:25px}
   .user-menu{width:100%;align-items:center}
 }
+
+
+.ai-capability{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;margin:0 0 16px;padding:11px 13px;background:#f8fafc;border:1px solid #e7ebf0;border-radius:9px;color:#526174;font-size:12px}
+.ai-capability b{color:#263548}
+.ai-capability small{flex-basis:100%;color:#a52828;line-height:1.5}
