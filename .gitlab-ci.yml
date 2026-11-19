@@ -33,6 +33,26 @@ validate_infrastructure:
     - tofu -chdir=infra/env/prod init -backend=false
     - tofu -chdir=infra/env/prod validate
 
+validate_frontend:
+  stage: validate
+  image: node:22-alpine
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+  script:
+    - cd frontend
+    - npm ci --no-audit --no-fund
+    - npm run build
+
+validate_backend_syntax:
+  stage: validate
+  image: python:3.12-slim
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+  script:
+    - python -m compileall -q backend/app
+
 .deploy_environment:
   image: docker:27.5.1
   services:
