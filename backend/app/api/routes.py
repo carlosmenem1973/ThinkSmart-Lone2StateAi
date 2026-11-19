@@ -518,7 +518,20 @@ def create_draft(lead_id: int, user: User = Depends(get_business_user), db: Sess
         raise HTTPException(status_code=400, detail="No verified recipient email on lead")
     if not lead.outreach_allowed or not lead.lawful_basis:
         raise HTTPException(status_code=403, detail="A documented lawful basis and channel permission are required before preparing outreach")
-    result = draft_outreach({"title": lead.title, "address": lead.address, "owner_name": lead.owner_name, "evidence": lead.evidence, "lawful_basis": lead.lawful_basis, "outreach_allowed": lead.outreach_allowed})
+    try:
+        result = await asyncio.to_thread(
+            draft_outreach,
+            {
+                "title": lead.title,
+                "address": lead.address,
+                "owner_name": lead.owner_name,
+                "evidence": lead.evidence,
+                "lawful_basis": lead.lawful_basis,
+                "outreach_allowed": lead.outreach_allowed,
+            },
+        )
+    except AIUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     draft = OutreachDraft(lead_id=lead.id, created_by=user.id, recipient=lead.owner_email, subject=result.get("subject", "Pedido de informação"), body=result.get("body", result.get("message", "")))
     db.add(draft)
     db.flush()
