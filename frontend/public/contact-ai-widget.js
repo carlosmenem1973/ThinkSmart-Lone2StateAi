@@ -38,7 +38,20 @@
     const item = document.createElement("div");
     item.className = "bubble " + role; item.textContent = text; log.appendChild(item); log.scrollTop = log.scrollHeight;
   }
-  const voiceInput = panel.querySelector(".voice-input");\n  const voiceOutput = panel.querySelector(".voice-output");\n  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;\n  let recognition = null;\n  let voiceReply = false;\n  if (SpeechRecognition) {\n    recognition = new SpeechRecognition(); recognition.lang = "pt-PT"; recognition.interimResults = false; recognition.maxAlternatives = 1;\n    recognition.onresult = event => { input.value = (input.value + " " + event.results[0][0].transcript).trim(); input.dataset.channel = "voice"; status.textContent = "Transcrição pronta. Reveja o texto antes de enviar."; voiceInput.textContent = "🎙️ Ditar novamente"; };\n    recognition.onerror = () => { status.textContent = "Não foi possível reconhecer a voz. Pode escrever a mensagem."; voiceInput.disabled = false; };\n    recognition.onend = () => { voiceInput.disabled = false; };\n    voiceInput.addEventListener("click", () => { try { voiceInput.disabled = true; status.textContent = "A ouvir…"; recognition.start(); } catch (_) { voiceInput.disabled = false; status.textContent = "O reconhecimento de voz já está ativo."; } });\n  } else { voiceInput.disabled = true; voiceInput.title = "O navegador não suporta reconhecimento de voz."; }\n  voiceOutput.addEventListener("click", () => { voiceReply = !voiceReply; voiceOutput.setAttribute("aria-pressed", String(voiceReply)); voiceOutput.textContent = voiceReply ? "🔊 Voz ligada" : "🔊 Voz desligada"; });\n  form.addEventListener("submit", async event => {
+  const voiceInput = panel.querySelector(".voice-input");
+  const voiceOutput = panel.querySelector(".voice-output");
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recognition = null;
+  let voiceReply = false;
+  if (SpeechRecognition) {
+    recognition = new SpeechRecognition(); recognition.lang = "pt-PT"; recognition.interimResults = false; recognition.maxAlternatives = 1;
+    recognition.onresult = event => { input.value = (input.value + " " + event.results[0][0].transcript).trim(); input.dataset.channel = "voice"; status.textContent = "Transcrição pronta. Reveja o texto antes de enviar."; voiceInput.textContent = "🎙️ Ditar novamente"; };
+    recognition.onerror = () => { status.textContent = "Não foi possível reconhecer a voz. Pode escrever a mensagem."; voiceInput.disabled = false; };
+    recognition.onend = () => { voiceInput.disabled = false; };
+    voiceInput.addEventListener("click", () => { try { voiceInput.disabled = true; status.textContent = "A ouvir…"; recognition.start(); } catch (_) { voiceInput.disabled = false; status.textContent = "O reconhecimento de voz já está ativo."; } });
+  } else { voiceInput.disabled = true; voiceInput.title = "O navegador não suporta reconhecimento de voz."; }
+  voiceOutput.addEventListener("click", () => { voiceReply = !voiceReply; voiceOutput.setAttribute("aria-pressed", String(voiceReply)); voiceOutput.textContent = voiceReply ? "🔊 Voz ligada" : "🔊 Voz desligada"; });
+  form.addEventListener("submit", async event => {
     event.preventDefault();
     const message = input.value.trim();
     if (!message) return;
@@ -50,12 +63,14 @@
         body: JSON.stringify({
           visitor_id: visitorId, message,
           email: panel.querySelector(".email").value || null,
-          consent_to_followup: panel.querySelector(".consent").checked,\n          channel
+          consent_to_followup: panel.querySelector(".consent").checked,
+          channel
         })
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.detail || "Não foi possível enviar a mensagem.");
-      addBubble(result.reply, "bot"); status.textContent = "Mensagem recebida.";\n      if (voiceReply && "speechSynthesis" in window) { window.speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance(result.reply); utterance.lang = "pt-PT"; window.speechSynthesis.speak(utterance); }
+      addBubble(result.reply, "bot"); status.textContent = "Mensagem recebida.";
+      if (voiceReply && "speechSynthesis" in window) { window.speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance(result.reply); utterance.lang = "pt-PT"; window.speechSynthesis.speak(utterance); }
     } catch (error) {
       addBubble(error.message || "Erro de ligação. Tente novamente.", "bot");
       status.textContent = "Não foi possível contactar o serviço.";
