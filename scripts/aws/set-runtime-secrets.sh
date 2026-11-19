@@ -2,7 +2,6 @@
 set -euo pipefail
 
 : "${AWS_REGION:?Set AWS_REGION}"
-: "${OPENAI_API_KEY:?Set OPENAI_API_KEY}"
 : "${SECRET_KEY:?Set SECRET_KEY}"
 : "${MICROSOFT_TENANT_ID:?Set MICROSOFT_TENANT_ID (use 'common' until tenant is configured)}"
 BOOTSTRAP_ADMIN_EMAIL="${BOOTSTRAP_ADMIN_EMAIL:-}"
@@ -19,7 +18,7 @@ DB_SECRET_ARN="$(tofu -chdir="$TF_DIR" output -raw db_master_secret_arn)"
 DB_ENDPOINT="$(tofu -chdir="$TF_DIR" output -raw db_endpoint)"
 REDIS_ENDPOINT="$(tofu -chdir="$TF_DIR" output -raw redis_endpoint)"
 DB_SECRET_JSON="$(aws secretsmanager get-secret-value --region "$AWS_REGION" --secret-id "$DB_SECRET_ARN" --query SecretString --output text)"
-export DB_SECRET_JSON DB_ENDPOINT REDIS_ENDPOINT OPENAI_API_KEY SECRET_KEY
+export DB_SECRET_JSON DB_ENDPOINT REDIS_ENDPOINT SECRET_KEY
 export BOOTSTRAP_ADMIN_EMAIL BOOTSTRAP_ADMIN_PASSWORD
 export MICROSOFT_TENANT_ID MICROSOFT_CLIENT_ID="${MICROSOFT_CLIENT_ID:-}"
 export MICROSOFT_CLIENT_SECRET="${MICROSOFT_CLIENT_SECRET:-}"
@@ -45,7 +44,6 @@ redis_url = f"rediss://{os.environ['REDIS_ENDPOINT']}:6379/0"
 secret = {
     "DATABASE_URL": db_url,
     "REDIS_URL": redis_url,
-    "OPENAI_API_KEY": os.environ["OPENAI_API_KEY"],
     "SECRET_KEY": os.environ["SECRET_KEY"],
     "BOOTSTRAP_ADMIN_EMAIL": os.environ["BOOTSTRAP_ADMIN_EMAIL"],
     "BOOTSTRAP_ADMIN_PASSWORD": os.environ["BOOTSTRAP_ADMIN_PASSWORD"],
