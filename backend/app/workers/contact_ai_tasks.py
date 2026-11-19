@@ -1,5 +1,5 @@
-from datetime import datetime, timezone
-from sqlalchemy import select, and_
+from datetime import datetime, timedelta, timezone
+from sqlalchemy import select
 from app.workers.celery_app import celery
 from app.core.database import SessionLocal
 from app.models.contact_ai import ContactAISettings, ContactConversation, ContactMessage
@@ -21,7 +21,7 @@ def process_contact_queue():
         conversations = db.scalars(
             select(ContactConversation).where(
                 ContactConversation.status == "open",
-                ContactConversation.last_message_at >= now - __import__('datetime').timedelta(minutes=30),
+                ContactConversation.last_message_at >= now - timedelta(minutes=30),
                 ContactConversation.consent_to_followup.is_(True),
             ).limit(50)
         ).all()
