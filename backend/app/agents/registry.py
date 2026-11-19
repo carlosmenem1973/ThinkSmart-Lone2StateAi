@@ -51,7 +51,7 @@ AGENTS = {
         "description": "Estrutura informação pública e validada sobre anúncios imobiliários.",
         "purpose": "Informação sobre anúncios",
         "instructions": (
-            "Organiza apenas informação pública fornecida ou encontrada em fontes autorizadas sobre anúncios. "
+            "Organiza apenas informação pública sobre anúncios que seja explicitamente fornecida pelo utilizador. "
             "Não identifiques proprietários sem evidência oficial, não infiras dados pessoais e assinala o que requer validação humana."
         ),
     },
