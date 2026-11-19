@@ -513,11 +513,11 @@ export default function App() {
           typeof data.result === 'string' ? data.result : JSON.stringify(data.result ?? data, null, 2)
         ),
         ...(data.sources?.length ? [
-          'Fontes consultadas:\\n' + data.sources.map(source =>
+          'Fontes consultadas:\n' + data.sources.map(source =>
             `[${source.index}] ${source.title || 'Fonte'} — ${source.url || ''}${source.published_at ? ` (${source.published_at})` : ''}`
-          ).join('\\n')
+          ).join('\n')
         ] : []),
-      ].join('\\n\\n');
+      ].join('\n\n');
       setAgentResults(previous => ({ ...previous, [agent.id]: result }));
     } catch (error) {
       setAgentError(error instanceof Error ? error.message : `Não foi possível executar ${agent.name}.`);
