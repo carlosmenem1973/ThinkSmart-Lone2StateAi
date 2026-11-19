@@ -44,7 +44,7 @@
           "value": "web-search.v1"
         },
         {
-          "name": "BEDROCK_REGION",
+          "name": "AWS_REGION",
           "value": "eu-west-1"
         },
         {
