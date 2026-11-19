@@ -1,3 +1,4 @@
+import asyncio
 import secrets
 import boto3
 import string
@@ -21,9 +22,7 @@ from app.models.entities import (
 from app.schemas.auth import ChangePasswordRequest, CreateUserRequest, LoginRequest, UserOut
 from app.schemas.leads import LeadCreate, LeadOut, LeadUpdate, FollowUpCreate
 from app.schemas.branding import BrandingUpdate
-from app.services.ai import research_web, draft_outreach, client as ai_client
-from app.agents.registry import AGENTS, AGENT_RUNNERS
-from agents import Runner
+from app.services.ai import research_web, draft_outreach, client as ai_client, AIUnavailable
 from app.agents.registry import AGENTS, AGENT_RUNNERS
 from agents import Runner
 
@@ -331,15 +330,35 @@ def update_lead(lead_id: int, payload: LeadUpdate, user: User = Depends(get_busi
     return lead
 
 
+@router.get("/ai/status")
+def ai_status(_user: User = Depends(get_business_user)):
+    """Expose non-sensitive capability status so the UI can explain disabled features."""
+    key_configured = bool(settings.openai_api_key.strip())
+    return {
+        "provider": "openai",
+        "model": settings.openai_model,
+        "api_key_configured": key_configured,
+        "internal_search_enabled": True,
+        "web_search_enabled": key_configured and settings.openai_web_search_enabled,
+        "agents_enabled": key_configured,
+        "web_search_reason": (
+            None if key_configured and settings.openai_web_search_enabled
+            else "OPENAI_API_KEY não está configurada."
+            if not key_configured
+            else "Pesquisa Web desativada por OPENAI_WEB_SEARCH_ENABLED."
+        ),
+        "agents_reason": None if key_configured else "OPENAI_API_KEY não está configurada no backend.",
+    }
+
+
 @router.post("/research")
-def run_research(
+async def run_research(
     query: str,
     source: str = "web",
     user: User = Depends(get_business_user),
     db: Session = Depends(get_db),
 ):
     """Run web research or search the signed-in user's permitted internal lead records."""
-    require_write_access(user)
     query = query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="Introduza uma pesquisa.")
@@ -375,18 +394,25 @@ def run_research(
             "count": len(items),
             "items": items,
             "text": (
-                f"Foram encontradas {len(items)} oportunidades nos registos a que tem acesso."
+                f"Foram encontradas {len(items)} oportunidades nos registos a que tem acesso.\n\n"
+                + "\n".join(
+                    f"- {item['title']} | {item['municipality'] or item['address'] or 'Localização por confirmar'} | "
+                    f"Score: {item['score']}/100 | Estado: {item['status'] or 'por classificar'}\n"
+                    f"  Fonte: {item['source_name'] or 'não indicada'} — {item['source_url'] or 'URL não disponível'}"
+                    for item in items
+                )
                 if items else "Não foram encontradas oportunidades correspondentes nos registos a que tem acesso."
             ),
         }
     elif source == "web":
         try:
-            result = research_web(query)
+            result = await asyncio.to_thread(research_web, query)
+        except AIUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except Exception as exc:
-            # Avoid exposing provider payloads, credentials, or internal request details.
             raise HTTPException(
                 status_code=502,
-                detail=f"Falha no fornecedor de pesquisa ({type(exc).__name__}). Verifique a chave e o modelo configurados no backend.",
+                detail=f"Falha no fornecedor de pesquisa ({type(exc).__name__}). Verifique a configuração de IA do backend.",
             ) from exc
     else:
         raise HTTPException(status_code=422, detail="A origem deve ser 'web' ou 'internal'.")
@@ -400,16 +426,20 @@ def run_research(
 
 @router.get("/agents")
 def list_agents(_user: User = Depends(get_business_user)):
-    """List the six supported agents for the signed-in workspace."""
-    return {"items": [
-        {
-            "id": agent_id,
-            "name": spec["name"],
-            "description": spec["description"],
-            "purpose": spec["purpose"],
-        }
-        for agent_id, spec in AGENTS.items()
-    ]}
+    """List the six supported agents and report whether execution is available."""
+    return {
+        "items": [
+            {
+                "id": agent_id,
+                "name": spec["name"],
+                "description": spec["description"],
+                "purpose": spec["purpose"],
+                "enabled": ai_client is not None,
+            }
+            for agent_id, spec in AGENTS.items()
+        ],
+        "enabled": ai_client is not None,
+    }
 
 
 @router.post("/agents/{agent_id}/run")
@@ -420,11 +450,10 @@ async def execute_agent(
     db: Session = Depends(get_db),
 ):
     """Execute a registered agent and return output explicitly marked for human review."""
-    require_write_access(user)
     if agent_id not in AGENT_RUNNERS:
         raise HTTPException(status_code=404, detail="Agente não encontrado.")
     if ai_client is None:
-        raise HTTPException(status_code=503, detail="O serviço de IA não está configurado. Verifique OPENAI_API_KEY.")
+        raise HTTPException(status_code=503, detail="Os agentes estão indisponíveis: configure OPENAI_API_KEY no Secrets Manager e reinicie o serviço API.")
 
     try:
         body = await request.json()
@@ -441,21 +470,26 @@ async def execute_agent(
     if agent_id in {"owner-intelligence", "lead-qualifier", "follow-up-assistant"} and not supplied:
         raise HTTPException(status_code=400, detail="Forneça os dados ou contexto que o agente deve analisar.")
 
-    # These two agents use the existing Responses API web-search service. The
-    # other agents use the Agents SDK and only the content supplied by the user.
     try:
         if agent_id in {"property-discovery", "market-analyst"}:
+            if not settings.openai_web_search_enabled:
+                raise HTTPException(status_code=503, detail="Pesquisa Web desativada por OPENAI_WEB_SEARCH_ENABLED.")
             task = AGENTS[agent_id]["instructions"] + "\nPedido: " + (
                 supplied or "Identifica oportunidades e tendências recentes no mercado imobiliário português."
             )
-            output = research_web(task).get("text", "")
+            response = await asyncio.to_thread(research_web, task)
+            output = response.get("text", "")
         else:
             result = await Runner.run(AGENT_RUNNERS[agent_id], supplied)
             output = getattr(result, "final_output", None) or str(result)
+    except HTTPException:
+        raise
+    except AIUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=502,
-            detail=f"Falha na execução do agente ({type(exc).__name__}). Verifique o modelo e a configuração de IA.",
+            detail=f"Falha na execução do agente ({type(exc).__name__}). Confirme OPENAI_API_KEY e OPENAI_MODEL no backend.",
         ) from exc
 
     audit(db, user, "agent.executed", "agent", agent_id, {"input_length": len(supplied)})
