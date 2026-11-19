@@ -402,7 +402,7 @@ resource "aws_ecs_task_definition" "worker" {
   execution_role_arn = aws_iam_role.execution.arn
   task_role_arn = aws_iam_role.task.arn
   container_definitions = jsonencode([{ name = "worker", image = "${aws_ecr_repository.worker.repository_url}:${var.api_image_tag}", essential = true, command = ["sh", "-c", "until alembic current 2>/dev/null | grep -q '(head)'; do sleep 3; done; exec celery -A app.workers.celery_app.celery worker --beat --loglevel=INFO"], environment = [{ name = "ENVIRONMENT", value = var.environment }, { name = "AWS_REGION", value = var.aws_region }, { name = "BEDROCK_MODEL_ID", value = "eu.amazon.nova-lite-v1:0" }, { name = "BEDROCK_AGENTCORE_WEB_SEARCH_ID", value = "web-search.v1" }, { name = "TIMEZONE", value = "Europe/Lisbon" }], secrets = [{ name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" }, { name = "REDIS_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:REDIS_URL::" }, { name = "SECRET_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SECRET_KEY::" }], logConfiguration = { logDriver = "awslogs", options = { "awslogs-group" = aws_cloudwatch_log_group.worker.name, "awslogs-region" = var.aws_region, "awslogs-stream-prefix" = "worker" } } }])
-  depends_on = [aws_iam_role_policy_attachment.execution, aws_iam_role_policy_attachment.task_secrets]
+  depends_on = [aws_iam_role_policy_attachment.execution, aws_iam_role_policy_attachment.task_secrets, aws_iam_role_policy.task_bedrock]
 }
 resource "aws_ecs_service" "api" {
   name = "api"
