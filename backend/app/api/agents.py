@@ -9,12 +9,17 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.auth import get_business_user, require_write_access
+from app.core.auth import get_business_user
 from app.core.config import settings
 from app.core.database import get_db
-from app.models.entities import FollowUp, Lead, User
+from app.models.entities import FollowUp, Lead, User, UserRole
 
 router = APIRouter(tags=["agents"])
+
+
+def require_write_access(user: User) -> None:
+    if user.role == UserRole.VIEWER:
+        raise HTTPException(status_code=403, detail="Viewer accounts have read-only access")
 
 AGENT_TASKS: dict[str, dict[str, Any]] = {
     "property-discovery": {
