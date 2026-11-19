@@ -87,7 +87,7 @@ const AGENTS: Agent[] = [
   {
     id: 'property-discovery',
     name: 'Agente de Descoberta',
-    description: 'Identifica oportunidades imobiliárias em fontes autorizadas.',
+    description: 'Descobre oportunidades imobiliárias em fontes públicas autorizadas.',
     purpose: 'Descoberta de imóveis',
     icon: Search,
   },
@@ -108,8 +108,8 @@ const AGENTS: Agent[] = [
   {
     id: 'owner-intelligence',
     name: 'Agente de Informação Pública',
-    description: 'Estrutura informação pública fornecida sobre anúncios, sem inferir a identidade de proprietários.',
-    purpose: 'Informação de proprietários',
+    description: 'Analisa evidência pública fornecida sobre anúncios, sem inferir a identidade de proprietários.',
+    purpose: 'Análise de anúncios',
     icon: UserSearch,
   },
   {
@@ -817,7 +817,7 @@ export default function App() {
               </div>
               {aiStatus && !aiStatus.agents_enabled && (
                 <div className="auth-error">
-                  {aiStatus.agents_reason || 'Os agentes precisam de uma chave OpenAI configurada no backend.'}
+                  {aiStatus.agents_reason || 'Os agentes necessitam de acesso IAM ao Amazon Bedrock na ECS Task Role.'}
                 </div>
               )}
               {aiStatusError && <div className="auth-error">{aiStatusError}</div>}
