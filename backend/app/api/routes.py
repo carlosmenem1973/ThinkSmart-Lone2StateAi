@@ -353,6 +353,7 @@ def ai_status(user: User = Depends(get_business_user)):
             else "Pesquisa Web desativada por BEDROCK_WEB_SEARCH_ENABLED."
         ),
         "agents_enabled": agents_ready,
+        "vision_analysis_configured": bool(settings.bedrock_vision_model_id.strip()) and can_run_ai,
         "agents_reason": (
             access_reason if not can_run_ai
             else None if model_configured
