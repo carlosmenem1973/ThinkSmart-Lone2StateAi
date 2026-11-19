@@ -11,7 +11,17 @@ Preserva React/Amplify, Cognito, FastAPI/ECS, RDS e AgentCore. Não cria tabelas
 
 ## IAM necessário antes de ativar Vision
 
+Nova 2 Lite aceita imagem via Converse e o perfil geográfico EU está disponível a partir de eu-west-1. O ID configurado é eu.amazon.nova-2-lite-v1:0. Confirmar sempre a disponibilidade e os modelos de destino com a conta AWS antes de aplicar IAM.
+
 A Task Role thinksmart-ecs-task-role precisa de bedrock:InvokeModel e bedrock:InvokeModelWithResponseStream para o inference profile Nova 2 Lite EU, modelos de destino autorizados e bedrock:GetInferenceProfile. Validar os ARNs reais e a condição bedrock:InferenceProfileArn na conta antes de aplicar. Manter a política atual Nova Lite e AgentCore Web Search.
+
+Diagnóstico antes da política:
+- aws bedrock get-inference-profile --inference-profile-identifier eu.amazon.nova-2-lite-v1:0 --region eu-west-1
+- Confirmar inferenceProfileArn e models[].modelArn devolvidos.
+- Adicionar esses ARNs à política existente da Task Role, sem substituir as permissões atuais.
+- Adicionar BEDROCK_VISION_MODEL_ID=eu.amazon.nova-2-lite-v1:0 à próxima Task Definition quando a equipa validar o acesso.
+
+O container está em subnets privadas. A extração de páginas e a análise de imagens necessitam de egress HTTPS para os domínios públicos dos anúncios; confirmar NAT Gateway/egress controlado. Sem egress, a pesquisa AgentCore pode continuar, mas as pré-visualizações e análise de imagens falham de forma best-effort/503.
 
 ## Rollout
 
