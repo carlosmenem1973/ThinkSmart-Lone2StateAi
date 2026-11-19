@@ -16,9 +16,8 @@ class Settings(BaseSettings):
     cognito_user_pool_id: str = ""
     cognito_app_client_id: str = ""
     frontend_origin: str = "http://localhost:5173"
-    openai_api_key: str = ""
-    openai_model: str = "gpt-6-astra"
-    openai_web_search_enabled: bool = True
+    bedrock_model_id: str = "eu.amazon.nova-lite-v1:0"
+    bedrock_agentcore_web_search_id: str = "web-search.v1"
     microsoft_tenant_id: str = "common"
     microsoft_client_id: str = ""
     microsoft_client_secret: str = ""
