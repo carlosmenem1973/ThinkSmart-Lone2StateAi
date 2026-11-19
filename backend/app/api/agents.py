@@ -192,10 +192,22 @@ def run_agent(
     except AIUnavailable as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    sources = [
+        {
+            "index": index,
+            "title": item.get("title"),
+            "url": item.get("url"),
+            "published_at": item.get("published_at"),
+        }
+        for index, item in enumerate(results, start=1)
+        if mode == "web" and item.get("url")
+    ] if mode == "web" else []
+
     return {
         "status": "completed",
         "agent_id": agent_id,
         "text": result_text,
+        "sources": sources,
         "provider": "amazon-bedrock",
-        "model": "Amazon Nova",
+        "model": "Amazon Nova Lite",
     }
