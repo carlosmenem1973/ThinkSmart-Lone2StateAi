@@ -148,7 +148,7 @@ async function readResponse<T>(response: Response): Promise<T> {
   }
   const payload = await response.json();
   if (!response.ok) {
-    const detail = payload?.detail || payload?.message;
+    const rawDetail = payload?.detail || payload?.message;\n    const detail = typeof rawDetail === "string" ? rawDetail : rawDetail ? JSON.stringify(rawDetail) : "";
     if (response.status === 404 && (!detail || detail === 'Not Found')) {
       throw new Error(`A rota não existe na versão da API em execução (${API}). O backend precisa de ser publicado com as rotas de Procura IA e Agentes IA.`);
     }
