@@ -51,3 +51,37 @@ def process_contact_queue():
         return {"status": "error", "reason": str(exc)}
     finally:
         db.close()
+
+
+@celery.task(name="app.workers.contact_ai_tasks.run_scheduled_property_discovery")
+def run_scheduled_property_discovery():
+    """Run due administrator-configured web discovery and save a report for human review."""
+    from app.services.ai import research_web
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        config = db.get(ContactAISettings, 1)
+        if not config or not config.search_enabled:
+            return {"status": "disabled"}
+        if config.next_search_at and config.next_search_at > now:
+            return {"status": "not_due"}
+        query = (config.search_query or "").strip()
+        if not query:
+            return {"status": "invalid_query"}
+        config.last_search_at = now
+        config.next_search_at = now + timedelta(minutes=max(60, min(config.search_interval_minutes, 10080)))
+        db.commit()
+        result = research_web(query)
+        db.add(AuditLog(action="property_discovery.automatic_completed", entity_type="property_search",
+                        entity_id="scheduled", details={"query": query, "report": result.get("text", "")[:16000],
+                        "sources": result.get("sources", []), "requires_human_review": True}))
+        db.commit()
+        return {"status": "completed", "source_count": len(result.get("sources", []))}
+    except AIUnavailable as exc:
+        db.rollback()
+        return {"status": "error", "reason": str(exc)}
+    except Exception as exc:
+        db.rollback()
+        return {"status": "error", "reason": type(exc).__name__}
+    finally:
+        db.close()
