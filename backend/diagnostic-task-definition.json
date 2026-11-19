@@ -1,0 +1,105 @@
+{
+    "containerDefinitions":  [
+                                 {
+                                     "name":  "thinksmart-api",
+                                     "image":  "049451987829.dkr.ecr.eu-west-1.amazonaws.com/thinksmart-api:1.1.1-diagnostic",
+                                     "cpu":  0,
+                                     "portMappings":  [
+                                                          {
+                                                              "containerPort":  8000,
+                                                              "hostPort":  8000,
+                                                              "protocol":  "tcp"
+                                                          }
+                                                      ],
+                                     "essential":  true,
+                                     "environment":  [
+                                                         {
+                                                             "name":  "AWS_REGION",
+                                                             "value":  "eu-west-1"
+                                                         },
+                                                         {
+                                                             "name":  "ENVIRONMENT",
+                                                             "value":  "production"
+                                                         },
+                                                         {
+                                                             "name":  "COGNITO_APP_CLIENT_ID",
+                                                             "value":  "6u2tfv98ro8bbkrub6bn2oarto"
+                                                         },
+                                                         {
+                                                             "name":  "BEDROCK_REGION",
+                                                             "value":  "eu-west-1"
+                                                         },
+                                                         {
+                                                             "name":  "CORS_ORIGINS",
+                                                             "value":  "https://www.webportal.thinksmart.pt,https://webportal.thinksmart.pt"
+                                                         },
+                                                         {
+                                                             "name":  "COGNITO_USER_POOL_ID",
+                                                             "value":  "eu-west-1_BZKyKZ2Uk"
+                                                         },
+                                                         {
+                                                             "name":  "BEDROCK_MODEL_ID",
+                                                             "value":  "eu.amazon.nova-micro-v1:0"
+                                                         }
+                                                     ],
+                                     "mountPoints":  [
+
+                                                     ],
+                                     "volumesFrom":  [
+
+                                                     ],
+                                     "secrets":  [
+                                                     {
+                                                         "name":  "DATABASE_URL",
+                                                         "valueFrom":  "arn:aws:secretsmanager:eu-west-1:049451987829:secret:thinksmart/production-8441h9:DATABASE_URL::"
+                                                     },
+                                                     {
+                                                         "name":  "SECRET_KEY",
+                                                         "valueFrom":  "arn:aws:secretsmanager:eu-west-1:049451987829:secret:thinksmart/production-8441h9:SECRET_KEY::"
+                                                     }
+                                                 ],
+                                     "logConfiguration":  {
+                                                              "logDriver":  "awslogs",
+                                                              "options":  {
+                                                                              "awslogs-group":  "/ecs/thinksmart-api",
+                                                                              "awslogs-region":  "eu-west-1",
+                                                                              "awslogs-stream-prefix":  "api"
+                                                                          }
+                                                          },
+                                     "healthCheck":  {
+                                                         "command":  [
+                                                                         "CMD-SHELL",
+                                                                         "curl -fsS http://127.0.0.1:8000/health/live || exit 1"
+                                                                     ],
+                                                         "interval":  30,
+                                                         "timeout":  5,
+                                                         "retries":  3,
+                                                         "startPeriod":  60
+                                                     },
+                                     "systemControls":  [
+
+                                                        ],
+                                     "workingDirectory":  "/app",
+                                     "command":  [
+                                                     "python",
+                                                     "-m",
+                                                     "scripts.diagnose_cognito_identity"
+                                                 ]
+                                 }
+                             ],
+    "family":  "thinksmart-api",
+    "taskRoleArn":  "arn:aws:iam::049451987829:role/thinksmart-ecs-task-role",
+    "executionRoleArn":  "arn:aws:iam::049451987829:role/thinksmart-ecs-execution-role",
+    "networkMode":  "awsvpc",
+    "volumes":  [
+
+                ],
+    "placementConstraints":  [
+
+                             ],
+    "requiresCompatibilities":  [
+                                    "FARGATE"
+                                ],
+    "cpu":  "1024",
+    "memory":  "2048"
+}

@@ -1,0 +1,33 @@
+"""Registry for the six ThinkSmart AI agents exposed by the API."""
+AGENTS = {
+    "property-discovery": {
+        "name": "Agente de Descoberta",
+        "description": "Identifica oportunidades imobiliárias em fontes públicas autorizadas.",
+        "source": "web",
+    },
+    "market-analyst": {
+        "name": "Agente de Mercado",
+        "description": "Analisa preços, zonas, tendências e posicionamento.",
+        "source": "mixed",
+    },
+    "lead-qualifier": {
+        "name": "Agente de Qualificação",
+        "description": "Organiza e classifica oportunidades da equipa comercial.",
+        "source": "internal",
+    },
+    "owner-intelligence": {
+        "name": "Agente de Informação Pública",
+        "description": "Estrutura informação pública e validada sobre anúncios.",
+        "source": "web",
+    },
+    "email-intelligence": {
+        "name": "Agente de Email",
+        "description": "Organiza pedidos, mensagens e oportunidades já processadas.",
+        "source": "internal",
+    },
+    "follow-up-assistant": {
+        "name": "Agente de Seguimento",
+        "description": "Prepara próximos passos e sugestões de acompanhamento.",
+        "source": "internal",
+    },
+}

@@ -1,7 +1,9 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
     app_name: str = "ThinkSmart AI"
     environment: str = "development"
     secret_key: str = "CHANGE_ME_TO_A_LONG_RANDOM_SECRET"
@@ -12,14 +14,21 @@ class Settings(BaseSettings):
     cookie_secure: bool | None = None
     database_url: str = "postgresql+psycopg://estateai:estateai@db:5432/estateai"
     redis_url: str = "redis://redis:6379/0"
+
+    # AWS: keep all service clients in the selected account/region.
     aws_region: str = "eu-west-1"
+    bedrock_region: str = "eu-west-1"
+    bedrock_model_id: str = "eu.amazon.nova-lite-v1:0"
+    bedrock_web_search_enabled: bool = True
+    bedrock_web_search_id: str = "web-search.v1"
+    agentcore_web_search_id: str = "web-search.v1"
+    agentcore_web_search_max_results: int = 10
+
+    # Existing Cognito configuration ÔÇö unchanged.
     cognito_user_pool_id: str = ""
     cognito_app_client_id: str = ""
     frontend_origin: str = "http://localhost:5173"
-    bedrock_region: str = "eu-west-1"
-    bedrock_model_id: str = "eu.amazon.nova-micro-v1:0"
-    bedrock_web_search_enabled: bool = True
-    bedrock_web_search_id: str = "web-search.v1"
+
     microsoft_tenant_id: str = "common"
     microsoft_client_id: str = ""
     microsoft_client_secret: str = ""
@@ -28,5 +37,6 @@ class Settings(BaseSettings):
     lead_score_threshold: int = 60
     default_country: str = "Portugal"
     timezone: str = "Europe/Lisbon"
+
 
 settings = Settings()

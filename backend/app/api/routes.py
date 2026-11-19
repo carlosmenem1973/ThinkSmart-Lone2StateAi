@@ -337,7 +337,7 @@ def ai_status(user: User = Depends(get_business_user)):
     web_ready = model_configured and settings.bedrock_web_search_enabled and can_run_ai
     agents_ready = model_configured and can_run_ai
     access_reason = (
-        "A conta tem perfil apenas de consulta. Solicite ao administrador acesso de execução."
+        "A conta tem perfil apenas de consulta. Solicite ao administrador acesso de execu├º├úo."
         if not can_run_ai else None
     )
     return {
@@ -348,7 +348,7 @@ def ai_status(user: User = Depends(get_business_user)):
         "web_search_reason": (
             access_reason if not can_run_ai
             else None if model_configured and settings.bedrock_web_search_enabled
-            else "BEDROCK_REGION ou BEDROCK_MODEL_ID não está configurado."
+            else "BEDROCK_REGION ou BEDROCK_MODEL_ID n├úo est├í configurado."
             if not model_configured
             else "Pesquisa Web desativada por BEDROCK_WEB_SEARCH_ENABLED."
         ),
@@ -356,7 +356,7 @@ def ai_status(user: User = Depends(get_business_user)):
         "agents_reason": (
             access_reason if not can_run_ai
             else None if model_configured
-            else "BEDROCK_REGION ou BEDROCK_MODEL_ID não está configurado."
+            else "BEDROCK_REGION ou BEDROCK_MODEL_ID n├úo est├í configurado."
         ),
     }
 
@@ -407,12 +407,12 @@ async def run_research(
             "text": (
                 f"Foram encontradas {len(items)} oportunidades nos registos a que tem acesso.\\n\\n"
                 + "\\n".join(
-                    f"- {item['title']} | {item['municipality'] or item['address'] or 'Localização por confirmar'} | "
+                    f"- {item['title']} | {item['municipality'] or item['address'] or 'Localiza├º├úo por confirmar'} | "
                     f"Score: {item['score']}/100 | Estado: {item['status'] or 'por classificar'}\\n"
-                    f"  Fonte: {item['source_name'] or 'não indicada'} — {item['source_url'] or 'URL não disponível'}"
+                    f"  Fonte: {item['source_name'] or 'n├úo indicada'} ÔÇö {item['source_url'] or 'URL n├úo dispon├¡vel'}"
                     for item in items
                 )
-                if items else "Não foram encontradas oportunidades correspondentes nos registos a que tem acesso."
+                if items else "N├úo foram encontradas oportunidades correspondentes nos registos a que tem acesso."
             ),
         }
     elif source == "web":
@@ -423,7 +423,7 @@ async def run_research(
         except Exception as exc:
             raise HTTPException(
                 status_code=502,
-                detail=f"Falha na pesquisa AWS ({type(exc).__name__}). Confirme as permissões Bedrock/AgentCore da ECS Task Role.",
+                detail=f"Falha na pesquisa AWS ({type(exc).__name__}). Confirme as permiss├Áes Bedrock/AgentCore da ECS Task Role.",
             ) from exc
     else:
         raise HTTPException(status_code=422, detail="A origem deve ser 'web' ou 'internal'.")
@@ -466,9 +466,9 @@ async def execute_agent(
     """Execute a specialist agent using Amazon Bedrock and AgentCore Web Search."""
     require_write_access(user)
     if agent_id not in AGENTS:
-        raise HTTPException(status_code=404, detail="Agente não encontrado.")
+        raise HTTPException(status_code=404, detail="Agente n├úo encontrado.")
     if not ai_available():
-        raise HTTPException(status_code=503, detail="Os agentes estão indisponíveis: configure BEDROCK_REGION e BEDROCK_MODEL_ID no backend.")
+        raise HTTPException(status_code=503, detail="Os agentes est├úo indispon├¡veis: configure BEDROCK_REGION e BEDROCK_MODEL_ID no backend.")
 
     try:
         body = await request.json()
@@ -482,7 +482,7 @@ async def execute_agent(
 
     definition = AGENTS[agent_id]
     if definition["requires_input"] and not supplied:
-        raise HTTPException(status_code=400, detail="Forneça o contexto ou os dados que o agente deve analisar.")
+        raise HTTPException(status_code=400, detail="Forne├ºa o contexto ou os dados que o agente deve analisar.")
     if definition["uses_web_search"] and not settings.bedrock_web_search_enabled:
         raise HTTPException(status_code=503, detail="Pesquisa Web desativada por BEDROCK_WEB_SEARCH_ENABLED.")
 
@@ -493,7 +493,7 @@ async def execute_agent(
     except Exception as exc:
         raise HTTPException(
             status_code=502,
-            detail=f"Falha na execução do agente ({type(exc).__name__}). Confirme BEDROCK_MODEL_ID e permissões IAM.",
+            detail=f"Falha na execu├º├úo do agente ({type(exc).__name__}). Confirme BEDROCK_MODEL_ID e permiss├Áes IAM.",
         ) from exc
 
     audit(db, user, "agent.executed", "agent", agent_id, {"input_length": len(supplied)})
@@ -508,7 +508,7 @@ async def execute_agent(
 
 
 @router.post("/leads/{lead_id}/draft")
-def create_draft(lead_id: int, user: User = Depends(get_business_user), db: Session = Depends(get_db)):
+async def create_draft(lead_id: int, user: User = Depends(get_business_user), db: Session = Depends(get_db)):
     require_write_access(user)
     lead = db.get(Lead, lead_id)
     if not lead:
@@ -532,7 +532,7 @@ def create_draft(lead_id: int, user: User = Depends(get_business_user), db: Sess
         )
     except AIUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    draft = OutreachDraft(lead_id=lead.id, created_by=user.id, recipient=lead.owner_email, subject=result.get("subject", "Pedido de informação"), body=result.get("body", result.get("message", "")))
+    draft = OutreachDraft(lead_id=lead.id, created_by=user.id, recipient=lead.owner_email, subject=result.get("subject", "Pedido de informa├º├úo"), body=result.get("body", result.get("message", "")))
     db.add(draft)
     db.flush()
     audit(db, user, "outreach_draft.created", "draft", str(draft.id), {"lead_id": lead.id})

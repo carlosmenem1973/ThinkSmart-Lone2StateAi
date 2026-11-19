@@ -2,38 +2,38 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "InvokeEUNovaMicroInferenceProfile",
+      "Sid": "InvokeEUNovaLiteInferenceProfile",
       "Effect": "Allow",
       "Action": [
         "bedrock:InvokeModel",
         "bedrock:InvokeModelWithResponseStream"
       ],
-      "Resource": "arn:aws:bedrock:eu-west-1:049451987829:inference-profile/eu.amazon.nova-micro-v1:0"
+      "Resource": "arn:aws:bedrock:eu-west-1:049451987829:inference-profile/eu.amazon.nova-lite-v1:0"
     },
     {
-      "Sid": "InvokeEUNovaMicroDestinationModels",
+      "Sid": "InvokeEUNovaLiteDestinationModels",
       "Effect": "Allow",
       "Action": [
         "bedrock:InvokeModel",
         "bedrock:InvokeModelWithResponseStream"
       ],
       "Resource": [
-        "arn:aws:bedrock:eu-west-1::foundation-model/amazon.nova-micro-v1:0",
-        "arn:aws:bedrock:eu-west-3::foundation-model/amazon.nova-micro-v1:0",
-        "arn:aws:bedrock:eu-central-1::foundation-model/amazon.nova-micro-v1:0",
-        "arn:aws:bedrock:eu-north-1::foundation-model/amazon.nova-micro-v1:0"
+        "arn:aws:bedrock:eu-west-1::foundation-model/amazon.nova-lite-v1:0",
+        "arn:aws:bedrock:eu-west-3::foundation-model/amazon.nova-lite-v1:0",
+        "arn:aws:bedrock:eu-central-1::foundation-model/amazon.nova-lite-v1:0",
+        "arn:aws:bedrock:eu-north-1::foundation-model/amazon.nova-lite-v1:0"
       ],
       "Condition": {
         "StringEquals": {
-          "bedrock:InferenceProfileArn": "arn:aws:bedrock:eu-west-1:049451987829:inference-profile/eu.amazon.nova-micro-v1:0"
+          "bedrock:InferenceProfileArn": "arn:aws:bedrock:eu-west-1:049451987829:inference-profile/eu.amazon.nova-lite-v1:0"
         }
       }
     },
     {
-      "Sid": "ReadEUInferenceProfile",
+      "Sid": "InvokeAgentCoreWebSearch",
       "Effect": "Allow",
-      "Action": "bedrock:GetInferenceProfile",
-      "Resource": "arn:aws:bedrock:eu-west-1:049451987829:inference-profile/eu.amazon.nova-micro-v1:0"
+      "Action": "bedrock-agentcore:InvokeWebSearch",
+      "Resource": "arn:aws:bedrock-agentcore:eu-west-1:aws:tool/web-search.v1"
     }
   ]
 }
