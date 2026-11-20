@@ -1,15 +1,27 @@
 import { FormEvent, useMemo, useState } from 'react';
-import { Search, LoaderCircle, Images, MapPin, ExternalLink, Sparkles, Scale, LayoutGrid, Map as MapIcon, AlertCircle } from 'lucide-react';
+import { Search, LoaderCircle, Images, MapPin, ExternalLink, Sparkles, Scale, LayoutGrid, Map as MapIcon, AlertCircle, Globe2, Database } from 'lucide-react';
 import './PropertySearchExperience.css';
 
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
+type SearchMode = 'web' | 'internal';
 type Property = {
   title: string; url: string; description?: string; image_url?: string | null; image_urls?: string[];
   price?: string | null; currency?: string | null; address?: string | null;
   latitude?: number | null; longitude?: number | null; source_name?: string | null;
 };
-type SearchResponse = { text?: string; properties?: Property[]; sources?: Array<{title:string;url:string}>; result_count?: number };
-type Props = { apiFetch: ApiFetch; aiStatus?: {web_search_enabled:boolean;web_search_reason?:string|null}|null; aiStatusError?:string };
+type InternalItem = {
+  id: number; title: string; address?: string | null; municipality?: string | null; district?: string | null;
+  source_name?: string | null; source_url?: string | null; score?: number | null; status?: string | null;
+};
+type SearchResponse = {
+  source?: SearchMode; text?: string; properties?: Property[]; items?: InternalItem[];
+  sources?: Array<{title:string;url:string}>; result_count?: number; count?: number;
+};
+type Props = {
+  apiFetch: ApiFetch;
+  aiStatus?: {web_search_enabled:boolean;web_search_reason?:string|null;internal_search_enabled:boolean;internal_search_reason?:string|null;vision_analysis_configured?:boolean}|null;
+  aiStatusError?:string;
+};
 type View = 'grid' | 'map';
 
 function formatPrice(price?: string | null, currency?: string | null) {
@@ -20,8 +32,23 @@ function formatPrice(price?: string | null, currency?: string | null) {
   catch { return price; }
 }
 
+function readableError(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(readableError).filter(Boolean).join('; ');
+  if (value && typeof value === 'object') {
+    const item = value as Record<string, unknown>;
+    if (typeof item.msg === 'string') return item.msg;
+    for (const key of ['detail','message','error','reason']) {
+      if (item[key] !== undefined) return readableError(item[key]);
+    }
+    return Object.entries(item).map(([key, entry]) => key + ': ' + readableError(entry)).join('; ');
+  }
+  return value == null ? '' : String(value);
+}
+
 export default function PropertySearchExperience({apiFetch,aiStatus,aiStatusError}:Props) {
-  const [query,setQuery] = useState('Apartamentos T2 em Lisboa até 350000 euros com varanda e estacionamento');
+  const [query,setQuery] = useState('Imóveis para venda em Algés');
+  const [mode,setMode] = useState<SearchMode>('web');
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState('');
   const [result,setResult] = useState<SearchResponse|null>(null);
@@ -29,35 +56,38 @@ export default function PropertySearchExperience({apiFetch,aiStatus,aiStatusErro
   const [compare,setCompare] = useState<string[]>([]);
   const [analysis,setAnalysis] = useState<Record<string,string>>({});
   const [analysing,setAnalysing] = useState<string|null>(null);
+  const [failedImages,setFailedImages] = useState<string[]>([]);
   const properties = result?.properties || [];
+  const internalItems = result?.items || [];
   const comparable = useMemo(()=>properties.filter(p=>compare.includes(p.url)).slice(0,3),[properties,compare]);
   const mapped = properties.filter(p=>Number.isFinite(p.latitude)&&Number.isFinite(p.longitude));
   const center = mapped.length ? mapped[0] : null;
   const mapUrl = center
     ? 'https://www.openstreetmap.org/export/embed.html?bbox=' + (Number(center.longitude)-0.08) + '%2C' + (Number(center.latitude)-0.06) + '%2C' + (Number(center.longitude)+0.08) + '%2C' + (Number(center.latitude)+0.06) + '&layer=mapnik&marker=' + center.latitude + '%2C' + center.longitude
     : '';
+  const modeAvailable = mode === 'web' ? aiStatus?.web_search_enabled !== false : aiStatus?.internal_search_enabled !== false;
 
   async function search(event:FormEvent) {
     event.preventDefault(); if(!query.trim()) return;
-    setBusy(true);setError('');setCompare([]);setAnalysis({});
+    setBusy(true);setError('');setCompare([]);setAnalysis({});setFailedImages([]);setResult(null);
     try {
-      const params=new URLSearchParams({query:query.trim(),source:'web'});
+      const params=new URLSearchParams({query:query.trim(),source:mode});
       const response=await apiFetch('/research?'+params.toString(),{method:'POST'});
       const payload=await response.json();
-      if(!response.ok) throw new Error(payload?.detail||'Pesquisa falhou (HTTP '+response.status+').');
+      if(!response.ok) throw new Error(readableError(payload?.detail)||readableError(payload?.message)||'Pesquisa falhou (HTTP '+response.status+').');
       setResult(payload as SearchResponse);
-      if(!(payload?.properties||[]).length) setError('Foram encontradas fontes, mas não foi possível extrair pré-visualizações de anúncios. Consulte as fontes originais.');
+      if(mode==='web' && !(payload?.properties||[]).length) setError('Foram encontradas fontes, mas não foi possível extrair pré-visualizações de anúncios. Consulte as fontes originais.');
     } catch(e) {setError(e instanceof Error?e.message:'Não foi possível concluir a pesquisa.');}
     finally {setBusy(false);}
   }
 
   async function analyse(property:Property) {
-    if(!property.image_url) return;
+    if(!property.image_url || aiStatus?.vision_analysis_configured === false) return;
     setAnalysing(property.url);setError('');
     try {
       const response=await apiFetch('/research/visual-analysis',{method:'POST',body:JSON.stringify({image_url:property.image_url,context:property.title})});
       const payload=await response.json();
-      if(!response.ok) throw new Error(payload?.detail||'Análise visual falhou (HTTP '+response.status+').');
+      if(!response.ok) throw new Error(readableError(payload?.detail)||'Análise visual falhou (HTTP '+response.status+').');
       setAnalysis(old=>({...old,[property.url]:payload.analysis}));
     } catch(e) {setError(e instanceof Error?e.message:'Não foi possível analisar a fotografia.');}
     finally {setAnalysing(null);}
@@ -68,38 +98,60 @@ export default function PropertySearchExperience({apiFetch,aiStatus,aiStatusErro
   }
 
   return <section className="property-search">
-    <div className="property-search-hero"><div>
-      <span className="property-eyebrow"><Sparkles size={14}/> PROCURA IA · INTELIGÊNCIA IMOBILIÁRIA</span>
-      <h2>Encontre o imóvel certo.</h2><p>Pesquise anúncios públicos, compare oportunidades e analise fotografias reais com IA.</p>
-    </div><div className="property-hero-mark"><Search size={30}/></div></div>
+    <div className="panelhead property-panelhead">
+      <div><h2><Search size={19}/> Pesquisa imobiliária</h2><p>Pesquise oportunidades na web ou na informação interna da plataforma.</p></div>
+    </div>
+    <div className="ai-capability" role="status">
+      <span><b>Pesquisa interna:</b> {aiStatus ? (aiStatus.internal_search_enabled ? 'disponível' : 'indisponível') : 'a verificar'}</span>
+      <span><b>Pesquisa Web:</b> {aiStatus ? (aiStatus.web_search_enabled ? 'disponível' : 'indisponível') : 'a verificar'}</span>
+    </div>
+    <div className="mode-switch" role="group" aria-label="Origem da pesquisa">
+      <button type="button" className={mode==='web'?'mode-option selected':'mode-option'} onClick={()=>{setMode('web');setError('');}}>
+        <Globe2 size={17}/> Pesquisa Web
+      </button>
+      <button type="button" className={mode==='internal'?'mode-option selected':'mode-option'} onClick={()=>{setMode('internal');setError('');}}>
+        <Database size={17}/> Pesquisa Interna
+      </button>
+    </div>
     <form className="property-query" onSubmit={search}>
-      <Search size={19}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Ex.: T2 em Lisboa até 350.000 €, com varanda" aria-label="Pesquisa de imóveis"/>
-      <button disabled={busy||!query.trim()||(aiStatus!==null&&aiStatus!==undefined&&!aiStatus.web_search_enabled)}>
-        {busy?<><LoaderCircle className="spin" size={16}/> A pesquisar</>:'Pesquisar imóveis'}
+      <Search size={19}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Ex.: apartamentos T2 em Lisboa até 350.000 €" aria-label="Pesquisa de imóveis"/>
+      <button disabled={busy||!query.trim()||!modeAvailable}>
+        {busy?<><LoaderCircle className="spin" size={16}/> A pesquisar…</>:<><Search size={16}/> Procurar</>}
       </button>
     </form>
-    {aiStatus&&!aiStatus.web_search_enabled&&<p className="property-hint"><AlertCircle size={15}/>{aiStatus.web_search_reason||'Pesquisa Web indisponível.'}</p>}
+    {!modeAvailable&&<p className="property-hint"><AlertCircle size={15}/>{mode==='web'?(aiStatus?.web_search_reason||'Pesquisa Web indisponível.'):(aiStatus?.internal_search_reason||'Pesquisa interna indisponível.')}</p>}
     {aiStatusError&&<p className="property-hint">{aiStatusError}</p>}
     {error&&<p className="property-hint property-error"><AlertCircle size={15}/>{error}</p>}
-    {result&&<>
-      <div className="property-results-head"><div><span className="property-eyebrow">RESULTADOS</span><h3>{properties.length} anúncios com pré-visualização</h3><p>{result.result_count??result.sources?.length??0} fontes consultadas · Fotografias obtidas dos anúncios originais</p></div>
+    {result&&mode==='web'&&<>
+      <div className="property-results-head"><div><span className="property-eyebrow">RESULTADOS DA PESQUISA WEB</span><h3>{properties.length} resultados</h3><p>{result.result_count??result.sources?.length??0} fontes consultadas · Fotografias apenas quando publicadas no anúncio original</p></div>
         <div className="property-view-switch"><button type="button" className={view==='grid'?'active':''} onClick={()=>setView('grid')}><LayoutGrid size={15}/> Grelha</button><button type="button" className={view==='map'?'active':''} onClick={()=>setView('map')}><MapIcon size={15}/> Mapa</button></div>
       </div>
-      {view==='grid'&&<div className="property-grid">{properties.map((p,i)=><article className="property-card" key={p.url}>
-        <div className={(p.image_urls?.length||p.image_url)?'property-photo property-photo-gallery':'property-photo'}>{(p.image_urls?.length?p.image_urls:(p.image_url?[p.image_url]:[])).slice(0,4).map((image,index)=><img key={image} src={image} alt={'Fotografia '+(index+1)+' do anúncio: '+p.title} loading="lazy" referrerPolicy="no-referrer"/>)}{!(p.image_urls?.length||p.image_url)&&<div className="property-no-photo"><Images size={27}/><span>Fotografia não disponibilizada pela fonte</span></div>}<span className="property-index">#{i+1}</span></div>
+      {view==='grid'&&<div className="property-grid">{properties.map((p,i)=>{
+        const images=(p.image_urls?.length?p.image_urls:(p.image_url?[p.image_url]:[])).filter(image=>!failedImages.includes(image)).slice(0,4);
+        return <article className="property-card" key={p.url}>
+        <div className={images.length?'property-photo property-photo-gallery':'property-photo'}>{images.map((image,index)=><img key={image} src={image} alt={'Fotografia '+(index+1)+' do anúncio: '+p.title} loading="lazy" referrerPolicy="no-referrer" onError={()=>setFailedImages(old=>old.includes(image)?old:[...old,image])}/>)}{!images.length&&<div className="property-no-photo"><Images size={27}/><span>Fotografia não disponível nesta fonte</span></div>}<span className="property-index">#{i+1}</span></div>
         <div className="property-card-body"><div className="property-card-price">{formatPrice(p.price,p.currency)}</div><h3>{p.title}</h3><p>{p.address||p.description||'Consulte o anúncio original para mais detalhes.'}</p><small>{p.source_name||'Fonte pública'}</small>
-          <div className="property-card-actions"><a href={p.url} target="_blank" rel="noreferrer"><ExternalLink size={14}/> Anúncio</a><button type="button" className={compare.includes(p.url)?'selected':''} onClick={()=>toggleCompare(p.url)} disabled={!compare.includes(p.url)&&compare.length>=3}><Scale size={14}/> Comparar</button></div>
-          {p.image_url&&<button type="button" className="property-analyse" onClick={()=>void analyse(p)} disabled={analysing!==null}>{analysing===p.url?<><LoaderCircle className="spin" size={14}/> A analisar</>:<><Sparkles size={14}/> Analisar fotografia com IA</>}</button>}
+          <div className="property-card-actions"><a href={p.url} target="_blank" rel="noreferrer"><ExternalLink size={14}/> Anúncio original</a><button type="button" className={compare.includes(p.url)?'selected':''} onClick={()=>toggleCompare(p.url)} disabled={!compare.includes(p.url)&&compare.length>=3}><Scale size={14}/> Comparar</button></div>
+          {p.image_url&&images.length>0&&aiStatus?.vision_analysis_configured!==false&&<button type="button" className="property-analyse" onClick={()=>void analyse(p)} disabled={analysing!==null}>{analysing===p.url?<><LoaderCircle className="spin" size={14}/> A analisar</>:<><Sparkles size={14}/> Analisar fotografia com IA</>}</button>}
           {analysis[p.url]&&<div className="property-analysis"><b>Análise visual IA</b><p>{analysis[p.url]}</p><small>Descrição visual assistida por IA; não constitui avaliação ou inspeção técnica.</small></div>}
-        </div></article>)}</div>}
+        </div></article>;
+      })}</div>}
       {view==='map'&&<div className="property-map-panel">
-        {center?<iframe title="Mapa dos imóveis com coordenadas publicadas" className="property-map" src={mapUrl} loading="lazy" referrerPolicy="no-referrer" />:<div className="property-map-empty"><MapPin size={30}/><b>Sem coordenadas verificadas</b><span>As fontes não publicaram coordenadas. Não vamos inventar localizações.</span></div>}
+        {center?<iframe title="Mapa de localização com coordenadas publicadas" className="property-map" src={mapUrl} loading="lazy" referrerPolicy="no-referrer" />:<div className="property-map-empty"><MapPin size={30}/><b>Sem coordenadas verificadas</b><span>As fontes não publicaram coordenadas. Não vamos inventar localizações.</span></div>}
         <div className="property-map-list">{properties.map(p=><a key={p.url} href={'https://www.openstreetmap.org/search?query='+encodeURIComponent(p.address||p.title)} target="_blank" rel="noreferrer"><MapPin size={14}/><span>{p.title}<small>{p.address||'Localização por confirmar'}</small></span></a>)}</div>
-        <small className="property-map-attribution">OpenStreetMap · Coordenadas apenas quando publicadas na fonte.</small>
+        <small className="property-map-attribution">OpenStreetMap · O marcador do mapa usa coordenadas publicadas na fonte; os restantes anúncios abrem a pesquisa por endereço.</small>
       </div>}
       {comparable.length>0&&<section className="property-compare"><div><h3><Scale size={17}/> Comparação de imóveis</h3><p>Selecionou {comparable.length} de 3 imóveis.</p></div><div className="property-compare-grid">{comparable.map(p=><article key={p.url}><b>{p.title}</b><strong>{formatPrice(p.price,p.currency)}</strong><span>{p.address||'Localização não indicada'}</span><a href={p.url} target="_blank" rel="noreferrer">Ver anúncio original</a></article>)}</div></section>}
       <section className="property-sources"><h3>Fontes originais</h3>{(result.sources||[]).map((s,i)=><a key={s.url} href={s.url} target="_blank" rel="noreferrer"><span>[{i+1}] {s.title}</span><ExternalLink size={13}/></a>)}</section>
       {result.text&&<details className="property-report"><summary>Ver síntese da pesquisa</summary><pre>{result.text}</pre></details>}
+    </>}
+    {result&&mode==='internal'&&<>
+      <div className="property-results-head"><div><span className="property-eyebrow">RESULTADOS DA PLATAFORMA</span><h3>{result.count??internalItems.length} oportunidades encontradas</h3><p>Registos internos a que a tua conta tem acesso.</p></div></div>
+      {internalItems.length>0?<div className="property-grid">{internalItems.map(item=><article className="property-card property-internal-card" key={item.id}>
+        <div className="property-card-body"><div className="property-card-price">{typeof item.score==='number'?'Score '+item.score+'/100':'Oportunidade interna'}</div><h3>{item.title}</h3><p>{[item.address,item.municipality,item.district].filter(Boolean).join(' · ')||'Localização não indicada'}</p><small>{item.source_name||'Registo interno'} · {item.status||'Por classificar'}</small>
+          {item.source_url&&<div className="property-card-actions"><a href={item.source_url} target="_blank" rel="noreferrer"><ExternalLink size={14}/> Fonte original</a></div>}
+        </div></article>)}</div>:<div className="property-map-empty"><Database size={28}/><b>Não foram encontradas oportunidades</b><span>Experimenta alterar os termos da pesquisa ou verifica os registos disponíveis.</span></div>}
+      {result.text&&<details className="property-report"><summary>Ver detalhe da pesquisa interna</summary><pre>{result.text}</pre></details>}
     </>}
   </section>;
 }
