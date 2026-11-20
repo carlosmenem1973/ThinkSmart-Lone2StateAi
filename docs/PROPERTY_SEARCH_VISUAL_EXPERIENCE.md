@@ -5,7 +5,7 @@ Preserva React/Amplify, Cognito, FastAPI/ECS, RDS e AgentCore. Não cria tabelas
 - A pesquisa mantém text, sources e result_count e acrescenta properties[].
 - As imagens vêm exclusivamente de Open Graph, Twitter Card ou JSON-LD do anúncio original. Se não houver imagem, o cartão mostra esse facto; nunca usa stock ou imagens geradas.
 - A análise visual usa Bedrock Converse com BEDROCK_VISION_MODEL_ID, por defeito eu.amazon.nova-2-lite-v1:0, e descreve apenas elementos observáveis. Não faz avaliação financeira, inspeção estrutural nem identificação de pessoas.
-- O mapa usa OpenStreetMap embed e só cria marcadores para coordenadas publicadas em JSON-LD. Sem coordenadas, apresenta pesquisa por endereço; não inventa pins.
+- A vista de mapa usa tiles OpenStreetMap e representa todos os anúncios com latitude/longitude publicadas e validadas no JSON-LD. Os marcadores são numerados e selecionáveis; a lista lateral sincroniza a seleção. Anúncios sem coordenadas permanecem na lista e abrem uma pesquisa por endereço, sem inventar pins. A implementação deve respeitar a política de utilização dos tiles OSM e apresentar atribuição visível.
 - A extração limita tempo, tamanho e redirects e rejeita DNS/IP não públicos. Isto não substitui egress firewall; bloquear RFC1918, loopback, link-local, metadata endpoints e IPv6 privados na rede.
 - Antes de armazenar/caching imagens, obter autorização/licença e definir retenção, atribuição e takedown. Esta implementação não copia imagens para S3.
 
