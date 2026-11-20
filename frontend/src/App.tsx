@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import ContactAIPanel from './components/ContactAIPanel';
+import PropertySearchExperience from './components/PropertySearchExperience';
 import {
   fetchAuthSession,
   signIn as cognitoSignIn,
@@ -801,44 +802,7 @@ export default function App() {
           </>
         )}
 
-        {section === 'procura' && (
-          <section className="panel">
-            <div className="panelhead">
-              <div><h2><Search size={19} /> Pesquisa imobiliária</h2><p>Pesquise oportunidades na web ou na informação interna da plataforma.</p></div>
-            </div>
-            <div className="ai-capability" role="status">
-              <span><b>Pesquisa interna:</b> {aiStatus ? (aiStatus.internal_search_enabled ? 'disponível' : 'indisponível') : 'a verificar'}</span>
-              <span>
-                <b>Pesquisa Web:</b> {aiStatus ? (aiStatus.web_search_enabled ? 'disponível' : 'indisponível') : 'a verificar'}
-              </span>
-              {aiStatus && searchMode === 'internal' && !aiStatus.internal_search_enabled && aiStatus.internal_search_reason && (
-                <small>{aiStatus.internal_search_reason}</small>
-              )}
-              {aiStatus && searchMode === 'web' && !aiStatus.web_search_enabled && aiStatus.web_search_reason && (
-                <small>{aiStatus.web_search_reason}</small>
-              )}
-              {aiStatusError && <small>{aiStatusError}</small>}
-            </div>
-            <div className="mode-switch" role="group" aria-label="Origem da pesquisa">
-              <button type="button" className={searchMode === 'web' ? 'mode-option selected' : 'mode-option'} onClick={() => setSearchMode('web')}>
-                <Globe2 size={17} /> Pesquisa Web
-              </button>
-              <button type="button" className={searchMode === 'internal' ? 'mode-option selected' : 'mode-option'} onClick={() => setSearchMode('internal')}>
-                <Database size={17} /> Pesquisa Interna
-              </button>
-            </div>
-            <form className="searchrow" onSubmit={runSearch}>
-              <input value={query} onChange={event => setQuery(event.target.value)}
-                placeholder="Ex.: apartamentos T2 em Lisboa até 350.000 €" />
-              <button disabled={searchBusy || !query.trim() || (searchMode === 'web' && aiStatus !== null && !aiStatus.web_search_enabled) || (searchMode === 'internal' && aiStatus !== null && !aiStatus.internal_search_enabled)} type="submit">
-                {searchBusy ? <><LoaderCircle className="spin" size={16} /> A pesquisar…</> : <><Search size={16} /> Procurar</>}
-              </button>
-            </form>
-            {searchError && <div className="auth-error">{searchError}</div>}
-            {report && <pre className="report">{report}</pre>}
-            {!report && !searchError && <div className="empty-state"><MapPin size={25} /><b>Encontre a próxima oportunidade</b><span>Escolha a origem, descreva o imóvel e inicie a pesquisa.</span></div>}
-          </section>
-        )}
+        {section === 'procura' && <PropertySearchExperience apiFetch={apiFetch} aiStatus={aiStatus} aiStatusError={aiStatusError} />}
 
         {section === 'agents' && (
           <>
