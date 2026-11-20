@@ -57,14 +57,34 @@ export default function PropertySearchExperience({apiFetch,aiStatus,aiStatusErro
   const [analysis,setAnalysis] = useState<Record<string,string>>({});
   const [analysing,setAnalysing] = useState<string|null>(null);
   const [failedImages,setFailedImages] = useState<string[]>([]);
+  const [selectedMapUrl,setSelectedMapUrl] = useState<string|null>(null);
   const properties = result?.properties || [];
   const internalItems = result?.items || [];
   const comparable = useMemo(()=>properties.filter(p=>compare.includes(p.url)).slice(0,3),[properties,compare]);
   const mapped = properties.filter(p=>Number.isFinite(p.latitude)&&Number.isFinite(p.longitude));
-  const center = mapped.length ? mapped[0] : null;
-  const mapUrl = center
-    ? 'https://www.openstreetmap.org/export/embed.html?bbox=' + (Number(center.longitude)-0.08) + '%2C' + (Number(center.latitude)-0.06) + '%2C' + (Number(center.longitude)+0.08) + '%2C' + (Number(center.latitude)+0.06) + '&layer=mapnik&marker=' + center.latitude + '%2C' + center.longitude
-    : '';
+  const mapLayout = useMemo(() => {
+    if (!mapped.length) return null;
+    const project = (lat:number, lon:number, zoom:number) => {
+      const scale = 256 * Math.pow(2, zoom);
+      const sin = Math.sin(Math.max(-85.0511, Math.min(85.0511, lat)) * Math.PI / 180);
+      return {x:(lon + 180) / 360 * scale,y:(0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * scale};
+    };
+    const bounds = mapped.map(p=>project(Number(p.latitude),Number(p.longitude),0));
+    const minX=Math.min(...bounds.map(p=>p.x)),maxX=Math.max(...bounds.map(p=>p.x));
+    const minY=Math.min(...bounds.map(p=>p.y)),maxY=Math.max(...bounds.map(p=>p.y));
+    const spanX=Math.max(maxX-minX,0.002),spanY=Math.max(maxY-minY,0.002);
+    const zoom=Math.max(4,Math.min(17,Math.floor(Math.min(Math.log2(580/spanX),Math.log2(360/spanY)))));
+    const center=project(mapped.reduce((s,p)=>s+Number(p.latitude),0)/mapped.length,mapped.reduce((s,p)=>s+Number(p.longitude),0)/mapped.length,zoom);
+    const left=center.x-320,top=center.y-210;
+    const xStart=Math.floor(left/256),yStart=Math.floor(top/256);
+    const tiles=[];
+    for(let x=xStart;x<=Math.floor((left+640)/256);x++) for(let y=yStart;y<=Math.floor((top+420)/256);y++){
+      const count=Math.pow(2,zoom);
+      if(y>=0&&y<count) tiles.push({key:x+'-'+y,src:'https://tile.openstreetmap.org/'+zoom+'/'+((x%count)+count)%count+'/'+y+'.png',left:x*256-left,top:y*256-top});
+    }
+    const markers=mapped.map((p)=>{const point=project(Number(p.latitude),Number(p.longitude),zoom);return {...p,left:point.x-left,top:point.y-top};});
+    return {tiles,markers,zoom};
+  },[mapped]);
   const modeAvailable = mode === 'web' ? aiStatus?.web_search_enabled !== false : aiStatus?.internal_search_enabled !== false;
 
   async function search(event:FormEvent) {
@@ -137,9 +157,12 @@ export default function PropertySearchExperience({apiFetch,aiStatus,aiStatusErro
         </div></article>;
       })}</div>}
       {view==='map'&&<div className="property-map-panel">
-        {center?<iframe title="Mapa de localização com coordenadas publicadas" className="property-map" src={mapUrl} loading="lazy" referrerPolicy="no-referrer" />:<div className="property-map-empty"><MapPin size={30}/><b>Sem coordenadas verificadas</b><span>As fontes não publicaram coordenadas. Não vamos inventar localizações.</span></div>}
-        <div className="property-map-list">{properties.map(p=><a key={p.url} href={'https://www.openstreetmap.org/search?query='+encodeURIComponent(p.address||p.title)} target="_blank" rel="noreferrer"><MapPin size={14}/><span>{p.title}<small>{p.address||'Localização por confirmar'}</small></span></a>)}</div>
-        <small className="property-map-attribution">OpenStreetMap · O marcador do mapa usa coordenadas publicadas na fonte; os restantes anúncios abrem a pesquisa por endereço.</small>
+        {mapLayout?<div className="property-map" role="region" aria-label="Mapa com todos os imóveis geolocalizados">
+          <div className="property-map-canvas">{mapLayout.tiles.map(tile=><img key={tile.key} className="property-map-tile" src={tile.src} alt="" style={{left:tile.left,top:tile.top}} loading="lazy"/>)}{mapLayout.markers.map((p,index)=><button key={p.url} type="button" className={'property-map-pin'+(selectedMapUrl===p.url?' selected':'')} style={{left:p.left,top:p.top}} title={p.title+' — '+formatPrice(p.price,p.currency)} onClick={()=>setSelectedMapUrl(p.url)}><span>{index+1}</span></button>)}</div>
+          <div className="property-map-zoom">OpenStreetMap · Zoom {mapLayout.zoom}</div>
+        </div>:<div className="property-map-empty"><MapPin size={30}/><b>Sem coordenadas verificadas</b><span>As fontes não publicaram coordenadas. Os imóveis sem coordenadas continuam disponíveis na lista, sem pins inventados.</span></div>}
+        <div className="property-map-list">{properties.map((p,index)=><button type="button" className={'property-map-item'+(selectedMapUrl===p.url?' selected':'')} key={p.url} onClick={()=>{setSelectedMapUrl(p.url);if(!Number.isFinite(p.latitude)||!Number.isFinite(p.longitude))window.open('https://www.openstreetmap.org/search?query='+encodeURIComponent(p.address||p.title),'_blank','noopener,noreferrer');}}><MapPin size={14}/><span><b>{index+1}. {p.title}</b><small>{p.address||'Localização por confirmar'}</small><strong>{formatPrice(p.price,p.currency)}</strong></span></button>)}</div>
+        <small className="property-map-attribution">Mapa OpenStreetMap com marcadores para todos os anúncios que fornecem coordenadas verificáveis. Os restantes mantêm pesquisa externa por endereço.</small>
       </div>}
       {comparable.length>0&&<section className="property-compare"><div><h3><Scale size={17}/> Comparação de imóveis</h3><p>Selecionou {comparable.length} de 3 imóveis.</p></div><div className="property-compare-grid">{comparable.map(p=><article key={p.url}><b>{p.title}</b><strong>{formatPrice(p.price,p.currency)}</strong><span>{p.address||'Localização não indicada'}</span><a href={p.url} target="_blank" rel="noreferrer">Ver anúncio original</a></article>)}</div></section>}
       <section className="property-sources"><h3>Fontes originais</h3>{(result.sources||[]).map((s,i)=><a key={s.url} href={s.url} target="_blank" rel="noreferrer"><span>[{i+1}] {s.title}</span><ExternalLink size={13}/></a>)}</section>
