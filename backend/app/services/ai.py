@@ -136,7 +136,7 @@ def search_web(query: str, *, max_results: int | None = None) -> list[dict[str, 
 
 def research_web(query: str, *, system_prompt: str | None = None) -> dict[str, Any]:
     """Search public web sources, then ask Bedrock to synthesise only the retrieved evidence."""
-    results = search_web(query)
+    results = search_web(query, max_results=10)
     if not results:
         return {
             "text": "A pesquisa Web n├úo devolveu fontes correspondentes. Tente reformular a consulta.",
