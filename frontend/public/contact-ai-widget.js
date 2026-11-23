@@ -32,7 +32,7 @@
   const log = panel.querySelector(".log");
   const form = panel.querySelector("form");
   const input = panel.querySelector("textarea");
-  const submit = panel.querySelector("button");
+  const submit = panel.querySelector("form button[type=\"submit\"]");
   const status = panel.querySelector(".status");
   function addBubble(text, role) {
     const item = document.createElement("div");
