@@ -32,8 +32,8 @@ def analytics_overview(days: int = Query(default=30, ge=1, le=90),
     event_filter = UsageEvent.created_at >= since
     active_today_since = datetime.now(timezone.utc) - timedelta(hours=24)
     total_users = db.scalar(select(func.count()).select_from(User).where(User.active.is_(True))) or 0
-    active_users = db.scalar(select(func.count(distinct(UsageEvent.user_id))).where(event_filter)) or 0
-    active_today = db.scalar(select(func.count(distinct(UsageEvent.user_id))).where(UsageEvent.created_at >= active_today_since)) or 0
+    active_users = db.scalar(select(func.count(distinct(UsageEvent.user_id))).join(User, User.id == UsageEvent.user_id).where(event_filter, User.active.is_(True))) or 0
+    active_today = db.scalar(select(func.count(distinct(UsageEvent.user_id))).join(User, User.id == UsageEvent.user_id).where(UsageEvent.created_at >= active_today_since, User.active.is_(True))) or 0
     event_count = db.scalar(select(func.count()).select_from(UsageEvent).where(event_filter)) or 0
     sessions = db.scalar(select(func.count(distinct(UsageEvent.session_id))).where(event_filter, UsageEvent.event_type == "session_start")) or 0
     feature_rows = db.execute(select(UsageEvent.feature, func.count()).where(event_filter, UsageEvent.event_type.in_(["page_view", "feature_action"])).group_by(UsageEvent.feature).order_by(func.count().desc())).all()
@@ -41,7 +41,7 @@ def analytics_overview(days: int = Query(default=30, ge=1, le=90),
         select(User.id, User.full_name, User.email, User.role, func.max(UsageEvent.created_at).label("last_active"),
                func.count(UsageEvent.id).label("events"))
         .join(UsageEvent, UsageEvent.user_id == User.id)
-        .where(event_filter)
+        .where(event_filter, User.active.is_(True))
         .group_by(User.id, User.full_name, User.email, User.role)
         .order_by(func.max(UsageEvent.created_at).desc())
         .limit(100)
