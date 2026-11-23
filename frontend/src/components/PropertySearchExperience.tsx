@@ -1,5 +1,5 @@
 import { FormEvent, useMemo, useState } from 'react';
-import { Search, LoaderCircle, Images, MapPin, ExternalLink, Sparkles, Scale, LayoutGrid, Map as MapIcon, AlertCircle, Globe2, Database } from 'lucide-react';
+import { Search, LoaderCircle, Images, MapPin, ExternalLink, Sparkles, Scale, LayoutGrid, Map as MapIcon, AlertCircle, Globe2, Database, Mic } from 'lucide-react';
 import './PropertySearchExperience.css';
 
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
@@ -44,6 +44,17 @@ function readableError(value: unknown): string {
     return Object.entries(item).map(([key, entry]) => key + ': ' + readableError(entry)).join('; ');
   }
   return value == null ? '' : String(value);
+}
+
+
+function startPropertyDictation(onText:(text:string)=>void) {
+  const browser=window as unknown as {SpeechRecognition?:new()=>any;webkitSpeechRecognition?:new()=>any};
+  const Recognition=browser.SpeechRecognition||browser.webkitSpeechRecognition;
+  if(!Recognition){window.alert('O reconhecimento de voz não é suportado neste navegador.');return;}
+  const recognition=new Recognition();recognition.lang='pt-PT';recognition.interimResults=false;recognition.maxAlternatives=1;
+  recognition.onresult=(event:any)=>{const text=event.results?.[0]?.[0]?.transcript;if(typeof text==='string'&&text.trim())onText(text.trim());};
+  recognition.onerror=()=>window.alert('Não foi possível reconhecer a voz. Pode escrever a pesquisa.');
+  recognition.start();
 }
 
 export default function PropertySearchExperience({apiFetch,aiStatus,aiStatusError}:Props) {
@@ -134,7 +145,7 @@ export default function PropertySearchExperience({apiFetch,aiStatus,aiStatusErro
       </button>
     </div>
     <form className="property-query" onSubmit={search}>
-      <Search size={19}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Ex.: apartamentos T2 em Lisboa até 350.000 €" aria-label="Pesquisa de imóveis"/>
+      <Search size={19}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Ex.: apartamentos T2 em Lisboa até 350.000 €" aria-label="Pesquisa de imóveis"/><button type="button" className="secondary" aria-label="Ditar pesquisa" onClick={()=>startPropertyDictation(text=>setQuery(current=>(current+" "+text).trim()))}><Mic size={16}/> Voz</button>
       <button disabled={busy||!query.trim()||!modeAvailable}>
         {busy?<><LoaderCircle className="spin" size={16}/> A pesquisar…</>:<><Search size={16}/> Procurar</>}
       </button>
