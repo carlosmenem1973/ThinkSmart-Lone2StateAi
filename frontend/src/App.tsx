@@ -265,6 +265,21 @@ export default function App() {
         setDash(null);
       }
     }
+    const method = (init.method || 'GET').toUpperCase();
+    if (response.ok && method !== 'GET' && !path.startsWith('/analytics')) {
+      const feature = path.startsWith('/research') ? 'procura'
+        : path.startsWith('/agents') ? 'agents'
+        : path.startsWith('/contact-ai') ? 'contact_ai'
+        : path.startsWith('/auth/users') ? 'team'
+        : path.startsWith('/leads') ? 'dashboard' : 'other';
+      const current = await fetchAuthSession();
+      const currentToken = current.tokens?.accessToken?.toString();
+      if (currentToken) void fetch(API + '/analytics/events', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + currentToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event_type: 'feature_action', feature, route: path.split('?')[0], session_id: analyticsSessionId.current }),
+      }).catch(() => undefined);
+    }
     return response;
   }, []);
 
