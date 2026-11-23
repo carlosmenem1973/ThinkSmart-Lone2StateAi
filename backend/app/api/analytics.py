@@ -14,7 +14,7 @@ router = APIRouter(prefix="/analytics", tags=["Analytics"])
 class UsageEventInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     event_type: Literal["session_start", "page_view", "feature_action"]
-    feature: Literal["dashboard", "procura", "agents", "contact_ai", "team", "settings", "other"]
+    feature: Literal["dashboard", "procura", "agents", "contact_ai", "team", "settings", "contacts", "analytics", "other"]
     route: str | None = Field(default=None, max_length=120, pattern=r"^/[a-zA-Z0-9_./-]*$")
     session_id: str = Field(min_length=8, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
 
