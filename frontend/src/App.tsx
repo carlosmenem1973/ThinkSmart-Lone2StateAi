@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import ContactAIPanel from './components/ContactAIPanel';
+import ContactDirectory from './components/ContactDirectory';
 import PropertySearchExperience from './components/PropertySearchExperience';
 import {
   fetchAuthSession,
@@ -75,7 +76,7 @@ type AiStatus = {
   agents_enabled: boolean;
   agents_reason?: string | null;
 };
-type Section = 'dashboard' | 'procura' | 'agents' | 'contact-ai' | 'team' | 'settings';
+type Section = 'dashboard' | 'procura' | 'agents' | 'contact-ai' | 'contacts' | 'team' | 'settings';
 
 type Agent = {
   id: string;
@@ -391,6 +392,7 @@ export default function App() {
     { id: 'procura' as const, label: 'Procura IA', icon: Search },
     { id: 'agents' as const, label: 'Agentes IA', icon: Bot },
     { id: 'contact-ai' as const, label: 'Contact AI', icon: MessageCircle },
+    { id: 'contacts' as const, label: 'Proprietários e Clientes', icon: Users },
     { id: 'team' as const, label: 'Equipa', icon: Users },
     { id: 'settings' as const, label: 'Definições', icon: ShieldCheck },
   ], []);
@@ -772,7 +774,7 @@ export default function App() {
           <button className="mobile-menu" onClick={() => setMobileNavOpen(true)} aria-label="Abrir menu"><Menu /></button>
           <div>
             <small>{branding.tagline.toUpperCase()}</small>
-            <h1>{section === 'procura' ? 'Procura IA' : section === 'agents' ? 'Agentes IA' : section === 'contact-ai' ? 'Contact AI' : section === 'team' ? 'Equipa' : section === 'settings' ? 'Definições' : 'Dashboard'}</h1>
+            <h1>{section === 'procura' ? 'Procura IA' : section === 'agents' ? 'Agentes IA' : section === 'contact-ai' ? 'Contact AI' : section === 'contacts' ? 'Proprietários e Clientes' : section === 'team' ? 'Equipa' : section === 'settings' ? 'Definições' : 'Dashboard'}</h1>
             <p>Descobrir oportunidades. Qualificar leads. Apoiar a equipa.</p>
           </div>
           <div className="user-menu">
@@ -852,6 +854,8 @@ export default function App() {
         )}
 
         {section === 'contact-ai' && <ContactAIPanel apiFetch={apiFetch} role={user.role} />}
+
+        {section === 'contacts' && <ContactDirectory apiFetch={apiFetch} />}
 
         {section === 'team' && (
           <>
