@@ -17,7 +17,7 @@ export default function AnalyticsPanel({apiFetch}:Props){
  const max=Math.max(1,...(data?.features||[]).map(x=>x.events));
  return <section className="analytics-page">
   <div className="panelhead"><div><h2 className="analytics-panel-title"><Activity size={19}/> Analytics de utilização</h2><p>Atividade real registada na aplicação por utilizador e funcionalidade.</p></div>
-   <div className="analytics-toolbar"><div className="analytics-period"><button className={days===7?'selected':''} onClick={()=>setDays(7)}>7 dias</button><button className={days===30?'selected':''} onClick={()=>setDays(30)}>30 dias</button><button className={days===90?'selected':''} onClick={()=>setDays(90)}>90 dias</button></div>
+   <div className="analytics-toolbar"><div className="analytics-period"><button className={days===7?'selected':''} onClick={()=>setDays(7)}>7 dias</button><button className={days===30?'selected':''} onClick={()=>setDays(30)}>30 dias</button><button className={days===90?'selected':''} onClick={()=>setDays(90)}>90 dias</button></div></div>
    <button className="secondary" onClick={()=>void load()} disabled={busy}>{busy?<RefreshCw className="spin" size={15}/>:<RefreshCw size={15}/>} Atualizar</button>
   </div>
   {error&&<div className="auth-error">{error}</div>}
@@ -30,8 +30,8 @@ export default function AnalyticsPanel({apiFetch}:Props){
    </section>
    <section className="panel">
     <div className="panelhead"><div><h3 className="analytics-section-title">Utilização por funcionalidade</h3><p>Visualizações e operações concluídas no período selecionado.</p></div></div>
-    {data.features.length?data.features.map(item=><div key={item.feature} style={{display:'grid',gridTemplateColumns:'150px 1fr 56px',gap:12,alignItems:'center',margin:'12px 0'}}>
-      <span>{labels[item.feature]||item.feature}</span><div style={{height:10,background:'var(--surface-muted, #e8edf5)',borderRadius:8,overflow:'hidden'}}><div style={{height:'100%',width:(item.events/max*100)+'%',background:'var(--brand-primary, #2563eb)',borderRadius:8}}/></div><b>{item.events}</b>
+    {data.features.length?data.features.map(item=><div key={item.feature} className="analytics-bar-row">
+      <span>{labels[item.feature]||item.feature}</span><div className="analytics-bar-track"><div className="analytics-bar-fill" style={{width:(item.events/max*100)+'%'}}/></div><b className="analytics-bar-value">{item.events}</b>
      </div>):<p className="empty">Ainda não existem eventos neste período.</p>}
    </section>
    <section className="panel analytics-users-panel">
