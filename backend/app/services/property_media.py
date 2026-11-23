@@ -220,7 +220,7 @@ def extract_property_preview(url: str, title: str, snippet: str) -> dict:
     except (httpx.HTTPError, OSError, ValueError, TypeError):
         pass
     # Geocode only an address explicitly published by the listing. Do not infer from title or municipality.
-    if item["latitude"] is None or item["longitude"] is None:
+    if (item["latitude"] is None or item["longitude"] is None) and item.get("address"):
         coordinates = geocode_verified_address(item.get("address"))
         if coordinates:
             item["latitude"], item["longitude"] = coordinates

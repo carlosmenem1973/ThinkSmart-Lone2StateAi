@@ -6,9 +6,11 @@ from app.core.config import settings
 from app.models import entities  # noqa: F401
 from app.models import contact_ai  # noqa: F401
 from app.models import contact  # noqa: F401
+from app.models import analytics  # noqa: F401
 from app.api.routes import router
 from app.api.contact_ai import router as contact_ai_router
 from app.api.contacts import router as contacts_router
+from app.api.analytics import router as analytics_router
 
 
 app = FastAPI(
@@ -53,6 +55,7 @@ app.add_middleware(
 app.include_router(router, prefix="/api/v1")
 app.include_router(contact_ai_router, prefix="/api/v1")
 app.include_router(contacts_router, prefix="/api/v1")
+app.include_router(analytics_router, prefix="/api/v1")
 
 
 @app.on_event("startup")
