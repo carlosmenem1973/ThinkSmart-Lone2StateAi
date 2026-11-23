@@ -1,4 +1,5 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import AnalyticsPanel from './components/AnalyticsPanel';
 import ContactAIPanel from './components/ContactAIPanel';
 import ContactDirectory from './components/ContactDirectory';
 import PropertySearchExperience from './components/PropertySearchExperience';
@@ -76,7 +77,7 @@ type AiStatus = {
   agents_enabled: boolean;
   agents_reason?: string | null;
 };
-type Section = 'dashboard' | 'procura' | 'agents' | 'contact-ai' | 'contacts' | 'team' | 'settings';
+type Section = 'dashboard' | 'procura' | 'agents' | 'contact-ai' | 'contacts' | 'analytics' | 'team' | 'settings';
 
 type Agent = {
   id: string;
@@ -228,6 +229,8 @@ export default function App() {
   const [passwordMessage, setPasswordMessage] = useState('');
 
   const [section, setSection] = useState<Section>('dashboard');
+  const analyticsSessionId = useRef(crypto.randomUUID());
+  const analyticsSessionStarted = useRef(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -282,6 +285,12 @@ export default function App() {
         setLeads([]);
         setDash(null);
       }
+    }
+    const method = (init.method || 'GET').toUpperCase();
+    if (response.ok && method !== 'GET' && !path.startsWith('/analytics')) {
+      const feature = path.startsWith('/research') ? 'procura' : path.startsWith('/agents') ? 'agents' : path.startsWith('/contact-ai') ? 'contact_ai' : path.startsWith('/auth/users') ? 'team' : path.startsWith('/leads') ? 'dashboard' : path.startsWith('/contacts') ? 'contacts' : 'other';
+      const current = await fetchAuthSession(); const currentToken = current.tokens?.accessToken?.toString();
+      if (currentToken) void fetch(API + '/analytics/events', { method: 'POST', headers: { Authorization: 'Bearer ' + currentToken, 'Content-Type': 'application/json' }, body: JSON.stringify({ event_type: 'feature_action', feature, route: path.split('?')[0], session_id: analyticsSessionId.current }) }).catch(() => undefined);
     }
     return response;
   }, []);
@@ -407,15 +416,27 @@ export default function App() {
     if (user && token) void loadDashboard();
   }, [user, token, loadDashboard]);
 
+  useEffect(() => {
+    if (!user || !token || analyticsSessionStarted.current) return;
+    analyticsSessionStarted.current = true;
+    void fetch(API + '/analytics/events', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ event_type: 'session_start', feature: 'dashboard', route: '/dashboard', session_id: analyticsSessionId.current }) }).catch(() => undefined);
+  }, [user, token]);
+
+  useEffect(() => {
+    if (!user || !token || !analyticsSessionStarted.current) return;
+    void fetch(API + '/analytics/events', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ event_type: 'page_view', feature: section, route: '/' + section, session_id: analyticsSessionId.current }) }).catch(() => undefined);
+  }, [section, user, token]);
+
   const navItems = useMemo(() => [
     { id: 'dashboard' as const, label: 'Dashboard', icon: ChartNoAxesCombined },
     { id: 'procura' as const, label: 'Procura IA', icon: Search },
     { id: 'agents' as const, label: 'Agentes IA', icon: Bot },
     { id: 'contact-ai' as const, label: 'Contact AI', icon: MessageCircle },
     { id: 'contacts' as const, label: 'Proprietários e Clientes', icon: Users },
+    ...(user && (user.role === 'admin' || user.role === 'super_admin') ? [{ id: 'analytics' as const, label: 'Analytics', icon: ChartNoAxesCombined }] : []),
     { id: 'team' as const, label: 'Equipa', icon: Users },
     { id: 'settings' as const, label: 'Definições', icon: ShieldCheck },
-  ], []);
+  ], [user]);
 
   async function signIn(event: FormEvent) {
     event.preventDefault();
@@ -794,7 +815,7 @@ export default function App() {
           <button className="mobile-menu" onClick={() => setMobileNavOpen(true)} aria-label="Abrir menu"><Menu /></button>
           <div>
             <small>{branding.tagline.toUpperCase()}</small>
-            <h1>{section === 'procura' ? 'Procura IA' : section === 'agents' ? 'Agentes IA' : section === 'contact-ai' ? 'Contact AI' : section === 'contacts' ? 'Proprietários e Clientes' : section === 'team' ? 'Equipa' : section === 'settings' ? 'Definições' : 'Dashboard'}</h1>
+            <h1>{section === 'procura' ? 'Procura IA' : section === 'agents' ? 'Agentes IA' : section === 'contact-ai' ? 'Contact AI' : section === 'contacts' ? 'Proprietários e Clientes' : section === 'analytics' ? 'Analytics' : section === 'team' ? 'Equipa' : section === 'settings' ? 'Definições' : 'Dashboard'}</h1>
             <p>Descobrir oportunidades. Qualificar leads. Apoiar a equipa.</p>
           </div>
           <div className="user-menu">
@@ -877,6 +898,7 @@ export default function App() {
         {section === 'contact-ai' && <ContactAIPanel apiFetch={apiFetch} role={user.role} />}
 
         {section === 'contacts' && <ContactDirectory apiFetch={apiFetch} />}
+        {section === 'analytics' && (user.role === 'admin' || user.role === 'super_admin') && <AnalyticsPanel apiFetch={apiFetch} />}
 
         {section === 'team' && (
           <>
