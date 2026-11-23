@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     # Amazon Bedrock - Nova Lite
     bedrock_region: str = "eu-west-1"
     bedrock_model_id: str = "eu.amazon.nova-lite-v1:0"
+    # Optional multimodal model used only for user-requested listing photo analysis.
+    bedrock_vision_model_id: str = "eu.amazon.nova-2-lite-v1:0"
 
     # AgentCore Web Search
     bedrock_web_search_enabled: bool = True

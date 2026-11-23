@@ -353,6 +353,7 @@ def ai_status(user: User = Depends(get_business_user)):
             else "Pesquisa Web desativada por BEDROCK_WEB_SEARCH_ENABLED."
         ),
         "agents_enabled": agents_ready,
+        "vision_analysis_configured": bool(settings.bedrock_vision_model_id.strip()) and can_run_ai,
         "agents_reason": (
             access_reason if not can_run_ai
             else None if model_configured
@@ -433,6 +434,37 @@ async def run_research(
     })
     db.commit()
     return result
+
+ 
+@router.post("/research/visual-analysis")
+async def analyse_research_image(
+    request: Request,
+    user: User = Depends(get_business_user),
+    db: Session = Depends(get_db),
+):
+    """Analyse a real listing photograph supplied by the listing preview; never generate images."""
+    require_write_access(user)
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Corpo JSON inválido.") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="O corpo tem de ser um objeto JSON.")
+    image_url = str(body.get("image_url") or "").strip()
+    context = str(body.get("context") or "").strip()
+    if not image_url or len(image_url) > 2000:
+        raise HTTPException(status_code=422, detail="Indique um URL de fotografia válido.")
+    if len(context) > 1000:
+        raise HTTPException(status_code=413, detail="O contexto excede 1.000 caracteres.")
+    try:
+        from urllib.parse import urlparse
+        from app.services.property_media import analyse_property_image
+        result = await asyncio.to_thread(analyse_property_image, image_url, context)
+        audit(db, user, "property.image_analysed", "research", "visual-analysis", {"image_host": urlparse(image_url).hostname})
+        db.commit()
+        return result
+    except AIUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.get("/agents")
