@@ -1,4 +1,5 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import AnalyticsPanel from './components/AnalyticsPanel';
 import ContactAIPanel from './components/ContactAIPanel';
 import PropertySearchExperience from './components/PropertySearchExperience';
 import {
@@ -75,7 +76,7 @@ type AiStatus = {
   agents_enabled: boolean;
   agents_reason?: string | null;
 };
-type Section = 'dashboard' | 'procura' | 'agents' | 'contact-ai' | 'team' | 'settings';
+type Section = 'dashboard' | 'procura' | 'agents' | 'contact-ai' | 'analytics' | 'team' | 'settings';
 
 type Agent = {
   id: string;
@@ -207,6 +208,8 @@ export default function App() {
   const [passwordMessage, setPasswordMessage] = useState('');
 
   const [section, setSection] = useState<Section>('dashboard');
+  const analyticsSessionId = useRef(crypto.randomUUID());
+  const analyticsSessionStarted = useRef(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -383,6 +386,17 @@ export default function App() {
   }, [branding]);
 
   useEffect(() => {
+    if (!user || !token || analyticsSessionStarted.current) return;
+    analyticsSessionStarted.current = true;
+    void fetch(API + '/analytics/events', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ event_type: 'session_start', feature: 'dashboard', route: '/dashboard', session_id: analyticsSessionId.current }) }).catch(() => undefined);
+  }, [user, token]);
+
+  useEffect(() => {
+    if (!user || !token || !analyticsSessionStarted.current) return;
+    void fetch(API + '/analytics/events', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ event_type: 'page_view', feature: section, route: '/' + section, session_id: analyticsSessionId.current }) }).catch(() => undefined);
+  }, [section]);
+
+  useEffect(() => {
     if (user && token) void loadDashboard();
   }, [user, token, loadDashboard]);
 
@@ -391,6 +405,7 @@ export default function App() {
     { id: 'procura' as const, label: 'Procura IA', icon: Search },
     { id: 'agents' as const, label: 'Agentes IA', icon: Bot },
     { id: 'contact-ai' as const, label: 'Contact AI', icon: MessageCircle },
+    ...(user && (user.role === 'admin' || user.role === 'super_admin') ? [{ id: 'analytics' as const, label: 'Analytics', icon: ChartNoAxesCombined }] : []),
     { id: 'team' as const, label: 'Equipa', icon: Users },
     { id: 'settings' as const, label: 'Definições', icon: ShieldCheck },
   ], []);
@@ -772,7 +787,7 @@ export default function App() {
           <button className="mobile-menu" onClick={() => setMobileNavOpen(true)} aria-label="Abrir menu"><Menu /></button>
           <div>
             <small>{branding.tagline.toUpperCase()}</small>
-            <h1>{section === 'procura' ? 'Procura IA' : section === 'agents' ? 'Agentes IA' : section === 'contact-ai' ? 'Contact AI' : section === 'team' ? 'Equipa' : section === 'settings' ? 'Definições' : 'Dashboard'}</h1>
+            <h1>{section === 'procura' ? 'Procura IA' : section === 'agents' ? 'Agentes IA' : section === 'contact-ai' ? 'Contact AI' : section === 'analytics' ? 'Analytics' : section === 'team' ? 'Equipa' : section === 'settings' ? 'Definições' : 'Dashboard'}</h1>
             <p>Descobrir oportunidades. Qualificar leads. Apoiar a equipa.</p>
           </div>
           <div className="user-menu">
@@ -852,6 +867,7 @@ export default function App() {
         )}
 
         {section === 'contact-ai' && <ContactAIPanel apiFetch={apiFetch} role={user.role} />}
+        {section === 'analytics' && (user.role === 'admin' || user.role === 'super_admin') && <AnalyticsPanel apiFetch={apiFetch} />}
 
         {section === 'team' && (
           <>
