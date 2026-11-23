@@ -4,6 +4,8 @@ from __future__ import annotations
 import ipaddress
 import json
 import socket
+import threading
+import time
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -17,6 +19,10 @@ TIMEOUT = httpx.Timeout(6.0, connect=3.0)
 MAX_HTML = 1_500_000
 MAX_IMAGE = 4_500_000
 USER_AGENT = "ThinkSmartAI-PropertyPreview/1.0 (+https://thinksmart.pt)"
+GEOCODER_USER_AGENT = "ThinkSmartAI/1.0 (https://thinksmart.pt; property-search)"
+_geocode_lock = threading.Lock()
+_geocode_last_request = 0.0
+_geocode_cache: dict[str, tuple[float, float] | None] = {}
 IMAGE_FORMATS = {"image/jpeg": "jpeg", "image/png": "png", "image/webp": "webp", "image/gif": "gif"}
 
 
@@ -82,13 +88,51 @@ def first_text(*values):
     return None
 
 
+
+def geocode_verified_address(address: str | None) -> tuple[float, float] | None:
+    """Resolve a published listing address only; never geocode a title or guess a location."""
+    global _geocode_last_request
+    if not address or len(address.strip()) < 8:
+        return None
+    query = address.strip()[:300]
+    if query in _geocode_cache:
+        return _geocode_cache[query]
+    # Nominatim public service policy: keep requests serial and at most one per second.
+    with _geocode_lock:
+        if query in _geocode_cache:
+            return _geocode_cache[query]
+        wait = 1.05 - (time.monotonic() - _geocode_last_request)
+        if wait > 0:
+            time.sleep(wait)
+        try:
+            with httpx.Client(timeout=httpx.Timeout(5.0, connect=3.0), trust_env=False,
+                              headers={"User-Agent": GEOCODER_USER_AGENT, "Accept": "application/json"}) as client:
+                response = client.get("https://nominatim.openstreetmap.org/search",
+                                      params={"q": query, "format": "jsonv2", "limit": 1, "addressdetails": 1})
+                _geocode_last_request = time.monotonic()
+                response.raise_for_status()
+                results = response.json()
+            if not results:
+                _geocode_cache[query] = None
+                return None
+            latitude, longitude = float(results[0]["lat"]), float(results[0]["lon"])
+            if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+                _geocode_cache[query] = None
+                return None
+            _geocode_cache[query] = (latitude, longitude)
+            return latitude, longitude
+        except (httpx.HTTPError, OSError, ValueError, KeyError, TypeError):
+            _geocode_cache[query] = None
+            return None
+
+
 def extract_property_preview(url: str, title: str, snippet: str) -> dict:
     item = {
         "title": title[:300], "url": url, "description": snippet[:1200],
         "image_url": None, "image_urls": [], "price": None, "currency": None, "address": None,
         "latitude": None, "longitude": None, "property_type": None,
         "source_name": urlparse(url).hostname or "Fonte externa",
-        "image_attribution_url": url,
+        "image_attribution_url": url, "location_precision": None, "map_location_source": None,
     }
     try:
         body, _, final_url = bounded_get(url, MAX_HTML, "text/")
@@ -105,12 +149,20 @@ def extract_property_preview(url: str, title: str, snippet: str) -> dict:
             candidate = meta.get("content")
             if candidate:
                 image_candidates.append(candidate)
+        # Property portals frequently expose images through lazy-loaded img attributes.
+        for image in soup.find_all("img"):
+            for raw_image in (image.get("src"), image.get("data-src"), image.get("data-lazy-src"), image.get("data-original")):
+                if raw_image:
+                    image_candidates.append(raw_image)
+            srcset = image.get("srcset") or image.get("data-srcset")
+            if srcset:
+                image_candidates.extend(part.strip().split(" ", 1)[0] for part in srcset.split(",") if part.strip())
         for raw_image in image_candidates:
             try:
                 safe_image = public_url(urljoin(final_url, raw_image))
-                if safe_image not in item["image_urls"]:
+                if safe_image not in item["image_urls"] and len(item["image_urls"]) < 8:
                     item["image_urls"].append(safe_image)
-            except ValueError:
+            except (ValueError, TypeError):
                 pass
         item["image_url"] = item["image_urls"][0] if item["image_urls"] else None
         for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
@@ -145,6 +197,9 @@ def extract_property_preview(url: str, title: str, snippet: str) -> dict:
                 try:
                     item["latitude"] = item["latitude"] or (float(geo.get("latitude")) if geo.get("latitude") is not None else None)
                     item["longitude"] = item["longitude"] or (float(geo.get("longitude")) if geo.get("longitude") is not None else None)
+                    if item["latitude"] is not None and item["longitude"] is not None:
+                        item["location_precision"] = "listing_coordinates"
+                        item["map_location_source"] = "listing"
                 except (TypeError, ValueError):
                     pass
                 images = node.get("image")
@@ -164,6 +219,13 @@ def extract_property_preview(url: str, title: str, snippet: str) -> dict:
                     item["image_url"] = item["image_urls"][0] if item["image_urls"] else None
     except (httpx.HTTPError, OSError, ValueError, TypeError):
         pass
+    # Geocode only an address explicitly published by the listing. Do not infer from title or municipality.
+    if item["latitude"] is None or item["longitude"] is None:
+        coordinates = geocode_verified_address(item.get("address"))
+        if coordinates:
+            item["latitude"], item["longitude"] = coordinates
+            item["location_precision"] = "address_geocoded"
+            item["map_location_source"] = "nominatim"
     return item
 
 
