@@ -25,6 +25,10 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - name: Install backend dependencies
         run: python -m pip install -r requirements.txt
+      - name: Install test dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Run backend tests
+        run: python -m pytest -q tests/
       - name: Compile backend and migrations
         run: python -m compileall -q app migrations
       - name: Validate Alembic revision chain
