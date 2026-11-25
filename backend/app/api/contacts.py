@@ -112,7 +112,7 @@ def import_contacts(payload: dict, db: Session = Depends(get_db), user: User = D
 
 @router.post("/import/update")
 def update_contacts_from_csv(payload: dict, db: Session = Depends(get_db), user: User = Depends(get_business_user)):
-    """Fill empty fields on uniquely matched contacts; never insert or overwrite populated values."""
+    """Update only email and phone for uniquely matched existing contacts."""
     if user.role == UserRole.VIEWER:
         raise HTTPException(403, "A conta tem acesso apenas de consulta.")
     raw = payload.get("csv")
@@ -121,11 +121,12 @@ def update_contacts_from_csv(payload: dict, db: Session = Depends(get_db), user:
     try:
         reader = csv.DictReader(io.StringIO(raw.lstrip("\ufeff")))
         required = {"contact_type", "full_name"}
-        fields = {"email": 320, "phone": 80, "municipality": 120, "district": 120, "property_preferences": 2000, "source": 500}
+        fields = {"email": 320, "phone": 80}
         if not reader.fieldnames or not required.issubset(set(reader.fieldnames)):
             raise HTTPException(422, "O CSV tem de incluir contact_type e full_name.")
-        if not (set(fields) & set(reader.fieldnames)):
-            raise HTTPException(422, "Inclui pelo menos um campo para atualizar.")
+        requested_fields = set(fields).intersection(reader.fieldnames)
+        if not requested_fields:
+            raise HTTPException(422, "O CSV tem de incluir email e/ou phone.")
         updated = unchanged = not_found = ambiguous = invalid = 0
         for row in reader:
             kind = (row.get("contact_type") or "").strip().lower()
@@ -133,7 +134,15 @@ def update_contacts_from_csv(payload: dict, db: Session = Depends(get_db), user:
             if kind not in {"owner", "client"} or len(name) < 2:
                 invalid += 1
                 continue
-            matches = db.scalars(_scope(select(Contact).where(Contact.contact_type == kind, Contact.full_name.ilike(name)), user)).all()
+            matches = db.scalars(
+                _scope(
+                    select(Contact).where(
+                        Contact.contact_type == kind,
+                        Contact.full_name.ilike(name, escape="\\"),
+                    ),
+                    user,
+                )
+            ).all()
             if not matches:
                 not_found += 1
                 continue
@@ -142,20 +151,32 @@ def update_contacts_from_csv(payload: dict, db: Session = Depends(get_db), user:
                 continue
             contact = matches[0]
             changed = False
-            for field, limit in fields.items():
+            for field in requested_fields:
                 value = (row.get(field) or "").strip()
-                if not value or getattr(contact, field):
+                if not value:
                     continue
-                value = value[:limit].lower() if field == "email" else value[:limit]
-                setattr(contact, field, value)
-                changed = True
+                if len(value) > fields[field]:
+                    invalid += 1
+                    changed = False
+                    break
+                value = value.lower() if field == "email" else value
+                if getattr(contact, field) != value:
+                    setattr(contact, field, value)
+                    changed = True
             if changed:
                 updated += 1
             else:
                 unchanged += 1
-        _audit(db, user, "contacts.enriched", "batch", {"updated": updated, "unchanged": unchanged, "not_found": not_found, "ambiguous": ambiguous, "invalid": invalid})
+        _audit(
+            db, user, "contacts.email_phone_updated", "batch",
+            {"updated": updated, "unchanged": unchanged, "not_found": not_found,
+             "ambiguous": ambiguous, "invalid": invalid},
+        )
         db.commit()
-        return {"updated": updated, "unchanged": unchanged, "not_found": not_found, "ambiguous": ambiguous, "invalid": invalid}
+        return {
+            "updated": updated, "unchanged": unchanged, "not_found": not_found,
+            "ambiguous": ambiguous, "invalid": invalid,
+        }
     except HTTPException:
         raise
     except Exception as exc:
