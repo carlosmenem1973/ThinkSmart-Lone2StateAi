@@ -2,7 +2,7 @@ import csv
 import io
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 from app.core.auth import get_business_user
 from app.core.database import get_db
@@ -138,7 +138,7 @@ def update_contacts_from_csv(payload: dict, db: Session = Depends(get_db), user:
                 _scope(
                     select(Contact).where(
                         Contact.contact_type == kind,
-                        Contact.full_name.ilike(name, escape="\\"),
+                        func.lower(Contact.full_name) == name.lower(),
                     ),
                     user,
                 )
@@ -150,16 +150,21 @@ def update_contacts_from_csv(payload: dict, db: Session = Depends(get_db), user:
                 ambiguous += 1
                 continue
             contact = matches[0]
-            changed = False
+            values = {}
+            row_invalid = False
             for field in requested_fields:
                 value = (row.get(field) or "").strip()
                 if not value:
                     continue
                 if len(value) > fields[field]:
-                    invalid += 1
-                    changed = False
+                    row_invalid = True
                     break
-                value = value.lower() if field == "email" else value
+                values[field] = value.lower() if field == "email" else value
+            if row_invalid:
+                invalid += 1
+                continue
+            changed = False
+            for field, value in values.items():
                 if getattr(contact, field) != value:
                     setattr(contact, field, value)
                     changed = True
