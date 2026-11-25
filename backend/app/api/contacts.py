@@ -109,6 +109,59 @@ def import_contacts(payload: dict, db: Session = Depends(get_db), user: User = D
     except Exception as exc:
         db.rollback(); raise HTTPException(422, f"Não foi possível importar o CSV ({type(exc).__name__}).")
 
+
+@router.post("/import/update")
+def update_contacts_from_csv(payload: dict, db: Session = Depends(get_db), user: User = Depends(get_business_user)):
+    """Fill empty fields on uniquely matched contacts; never insert or overwrite populated values."""
+    if user.role == UserRole.VIEWER:
+        raise HTTPException(403, "A conta tem acesso apenas de consulta.")
+    raw = payload.get("csv")
+    if not isinstance(raw, str) or len(raw) > 1_000_000:
+        raise HTTPException(413, "CSV inválido ou superior a 1 MB.")
+    try:
+        reader = csv.DictReader(io.StringIO(raw.lstrip("\ufeff")))
+        required = {"contact_type", "full_name"}
+        fields = {"email": 320, "phone": 80, "municipality": 120, "district": 120, "property_preferences": 2000, "source": 500}
+        if not reader.fieldnames or not required.issubset(set(reader.fieldnames)):
+            raise HTTPException(422, "O CSV tem de incluir contact_type e full_name.")
+        if not (set(fields) & set(reader.fieldnames)):
+            raise HTTPException(422, "Inclui pelo menos um campo para atualizar.")
+        updated = unchanged = not_found = ambiguous = invalid = 0
+        for row in reader:
+            kind = (row.get("contact_type") or "").strip().lower()
+            name = (row.get("full_name") or "").strip()
+            if kind not in {"owner", "client"} or len(name) < 2:
+                invalid += 1
+                continue
+            matches = db.scalars(_scope(select(Contact).where(Contact.contact_type == kind, Contact.full_name.ilike(name)), user)).all()
+            if not matches:
+                not_found += 1
+                continue
+            if len(matches) != 1:
+                ambiguous += 1
+                continue
+            contact = matches[0]
+            changed = False
+            for field, limit in fields.items():
+                value = (row.get(field) or "").strip()
+                if not value or getattr(contact, field):
+                    continue
+                value = value[:limit].lower() if field == "email" else value[:limit]
+                setattr(contact, field, value)
+                changed = True
+            if changed:
+                updated += 1
+            else:
+                unchanged += 1
+        _audit(db, user, "contacts.enriched", "batch", {"updated": updated, "unchanged": unchanged, "not_found": not_found, "ambiguous": ambiguous, "invalid": invalid})
+        db.commit()
+        return {"updated": updated, "unchanged": unchanged, "not_found": not_found, "ambiguous": ambiguous, "invalid": invalid}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(422, f"Não foi possível atualizar os contactos ({type(exc).__name__}).")
+
 @router.post("/agent-audience")
 def get_agent_audience(payload: dict, db: Session = Depends(get_db), user: User = Depends(get_business_user)):
     ids = payload.get("contact_ids", [])
