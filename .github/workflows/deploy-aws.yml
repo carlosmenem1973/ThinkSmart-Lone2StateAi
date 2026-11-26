@@ -1,0 +1,227 @@
+name: ThinkSmart AWS Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: AWS environment to deploy
+        type: choice
+        required: true
+        default: dev
+        options:
+          - dev
+          - prod
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: thinksmart-deploy-${{ inputs.target_environment }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-west-1
+  TOFU_VERSION: 1.10.6
+
+jobs:
+  validate:
+    name: Validate application and infrastructure
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: python -m pip install --no-cache-dir -r backend/requirements.txt
+
+      - name: Compile backend and migrations
+        run: python -m compileall -q backend/app backend/migrations
+
+      - name: Validate Alembic revision chain
+        working-directory: backend
+        run: |
+          python -m pip install --no-cache-dir alembic
+          alembic history
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+
+      - name: Validate OpenTofu configurations
+        run: |
+          tofu fmt -check -recursive infra
+          tofu -chdir=infra/env/dev init -backend=false
+          tofu -chdir=infra/env/dev validate
+          tofu -chdir=infra/env/prod init -backend=false
+          tofu -chdir=infra/env/prod validate
+
+  deploy:
+    name: Deploy to AWS (${{ inputs.target_environment }})
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.target_environment }}
+    env:
+      TARGET_ENV: ${{ inputs.target_environment }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      GITLAB_OIDC_PROVIDER_ARN: ${{ vars.GITLAB_OIDC_PROVIDER_ARN }}
+      GITLAB_OIDC_SUBJECT: ${{ vars.GITLAB_OIDC_SUBJECT }}
+      SECRET_KEY: ${{ secrets.SECRET_KEY }}
+      BOOTSTRAP_ADMIN_EMAIL: ${{ secrets.BOOTSTRAP_ADMIN_EMAIL }}
+      BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.BOOTSTRAP_ADMIN_PASSWORD }}
+      MICROSOFT_TENANT_ID: ${{ vars.MICROSOFT_TENANT_ID }}
+      MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
+      MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
+      GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+      CERTIFICATE_ARN: ${{ vars.ALB_CERTIFICATE_ARN }}
+      API_ORIGIN_DOMAIN_NAME: ${{ vars.API_ORIGIN_DOMAIN_NAME }}
+      ROUTE53_ZONE_ID: ${{ vars.ROUTE53_ZONE_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+
+      - name: Configure AWS credentials with GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-${{ github.run_id }}-${{ inputs.target_environment }}
+
+      - name: Verify deployment configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${TF_STATE_BUCKET:?Set TF_STATE_BUCKET in GitHub environment variables}"
+          : "${AWS_ACCOUNT_ID:?Set AWS_ACCOUNT_ID in GitHub environment variables}"
+          : "${AWS_ROLE_ARN:?Set AWS_ROLE_ARN in GitHub environment secrets}"
+          : "${GITLAB_OIDC_PROVIDER_ARN:?Set GITLAB_OIDC_PROVIDER_ARN to preserve the existing GitLab CI role during migration}"
+          : "${GITLAB_OIDC_SUBJECT:?Set GITLAB_OIDC_SUBJECT to preserve the existing GitLab CI role during migration}"
+          : "${SECRET_KEY:?Set SECRET_KEY in GitHub environment secrets}"
+          : "${MICROSOFT_TENANT_ID:?Set MICROSOFT_TENANT_ID in GitHub environment variables}"
+          aws sts get-caller-identity
+          test "$(aws sts get-caller-identity --query Account --output text)" = "$AWS_ACCOUNT_ID"
+
+      - name: Initialize OpenTofu remote state
+        shell: bash
+        run: |
+          set -euo pipefail
+          TF_DIR="infra/env/$TARGET_ENV"
+          tofu -chdir="$TF_DIR" init \
+            -backend-config="bucket=$TF_STATE_BUCKET" \
+            -backend-config="key=thinksmart-lone2stateai/$TARGET_ENV/terraform.tfstate" \
+            -backend-config="region=$AWS_REGION" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+
+      - name: Bootstrap infrastructure and ECR
+        shell: bash
+        run: |
+          set -euo pipefail
+          TF_DIR="infra/env/$TARGET_ENV"
+          export TF_VAR_gitlab_oidc_provider_arn="$GITLAB_OIDC_PROVIDER_ARN"
+          export TF_VAR_gitlab_subject="$GITLAB_OIDC_SUBJECT"
+          export TF_VAR_certificate_arn="${CERTIFICATE_ARN:-}"
+          export TF_VAR_api_origin_domain_name="${API_ORIGIN_DOMAIN_NAME:-}"
+          export TF_VAR_route53_zone_id="${ROUTE53_ZONE_ID:-}"
+          tofu -chdir="$TF_DIR" apply -auto-approve \
+            -var="api_image_tag=bootstrap" \
+            -var="api_desired_count=0" \
+            -var="worker_desired_count=0" \
+            -var="gitlab_oidc_provider_arn=$GITLAB_OIDC_PROVIDER_ARN" \
+            -var="gitlab_subject=$GITLAB_OIDC_SUBJECT"
+
+      - name: Build and push API and worker images
+        shell: bash
+        run: |
+          set -euo pipefail
+          TF_DIR="infra/env/$TARGET_ENV"
+          IMAGE_TAG="${GITHUB_SHA:0:12}-${GITHUB_RUN_NUMBER}"
+          API_ECR="$(tofu -chdir="$TF_DIR" output -raw api_ecr_url)"
+          WORKER_ECR="$(tofu -chdir="$TF_DIR" output -raw worker_ecr_url)"
+          aws ecr get-login-password --region "$AWS_REGION" |
+            docker login --username AWS --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+          docker build --pull -f backend/Dockerfile -t "$API_ECR:$IMAGE_TAG" backend
+          docker push "$API_ECR:$IMAGE_TAG"
+          docker tag "$API_ECR:$IMAGE_TAG" "$WORKER_ECR:$IMAGE_TAG"
+          docker push "$WORKER_ECR:$IMAGE_TAG"
+          echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
+
+      - name: Update application runtime secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          TF_DIR="infra/env/$TARGET_ENV"
+          export TF_DIR AWS_REGION SECRET_KEY
+          export BOOTSTRAP_ADMIN_EMAIL="${BOOTSTRAP_ADMIN_EMAIL:-}"
+          export BOOTSTRAP_ADMIN_PASSWORD="${BOOTSTRAP_ADMIN_PASSWORD:-}"
+          export MICROSOFT_TENANT_ID
+          export MICROSOFT_CLIENT_ID="${MICROSOFT_CLIENT_ID:-}"
+          export MICROSOFT_CLIENT_SECRET="${MICROSOFT_CLIENT_SECRET:-}"
+          export GOOGLE_MAPS_API_KEY="${GOOGLE_MAPS_API_KEY:-}"
+          CLOUDFRONT_DOMAIN="$(tofu -chdir="$TF_DIR" output -raw cloudfront_domain)"
+          export MICROSOFT_REDIRECT_URI="https://$CLOUDFRONT_DOMAIN/api/v1/integrations/microsoft/callback"
+          ./scripts/aws/set-runtime-secrets.sh
+
+      - name: Deploy ECS services and frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          TF_DIR="infra/env/$TARGET_ENV"
+          if [ "$TARGET_ENV" = "prod" ]; then
+            API_DESIRED_COUNT=2
+          else
+            API_DESIRED_COUNT=1
+          fi
+          export TF_VAR_gitlab_oidc_provider_arn="$GITLAB_OIDC_PROVIDER_ARN"
+          export TF_VAR_gitlab_subject="$GITLAB_OIDC_SUBJECT"
+          export TF_VAR_certificate_arn="${CERTIFICATE_ARN:-}"
+          export TF_VAR_api_origin_domain_name="${API_ORIGIN_DOMAIN_NAME:-}"
+          export TF_VAR_route53_zone_id="${ROUTE53_ZONE_ID:-}"
+          tofu -chdir="$TF_DIR" apply -auto-approve \
+            -var="api_image_tag=$IMAGE_TAG" \
+            -var="api_desired_count=$API_DESIRED_COUNT" \
+            -var="worker_desired_count=1" \
+            -var="gitlab_oidc_provider_arn=$GITLAB_OIDC_PROVIDER_ARN" \
+            -var="gitlab_subject=$GITLAB_OIDC_SUBJECT"
+
+          FRONTEND_BUCKET="$(tofu -chdir="$TF_DIR" output -raw frontend_bucket)"
+          CLOUDFRONT_DOMAIN="$(tofu -chdir="$TF_DIR" output -raw cloudfront_domain)"
+          ECS_CLUSTER="$(tofu -chdir="$TF_DIR" output -raw ecs_cluster_name)"
+          API_SERVICE="$(tofu -chdir="$TF_DIR" output -raw api_service_name)"
+          WORKER_SERVICE="$(tofu -chdir="$TF_DIR" output -raw worker_service_name)"
+          DISTRIBUTION_ID="$(tofu -chdir="$TF_DIR" output -raw cloudfront_distribution_id)"
+
+          npm --prefix frontend ci --no-audit --no-fund
+          npm --prefix frontend run build
+          aws s3 sync frontend/dist "s3://$FRONTEND_BUCKET/" --delete
+          aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths '/*' >/dev/null
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$API_SERVICE" "$WORKER_SERVICE"
+          echo "Deployment complete: https://$CLOUDFRONT_DOMAIN"
