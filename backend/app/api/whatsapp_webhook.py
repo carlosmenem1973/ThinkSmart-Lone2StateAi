@@ -40,7 +40,8 @@ def _valid_signature(raw_body: bytes, signature: str | None) -> bool:
 
 
 def _normalise_phone(value: str | None) -> str:
-    return "".join(ch for ch in (value or "") if ch.isdigit())
+    digits = "".join(ch for ch in (value or "") if ch.isdigit())
+    return digits[2:] if digits.startswith("00") else digits
 
 
 def _channel_ready(db: Session, phone_number_id: str) -> bool:
@@ -160,7 +161,7 @@ def process_whatsapp_inbound_message(message_id: int) -> None:
             return
         thread = db.get(CommunicationThread, inbound.thread_id)
         contact = db.get(Contact, thread.contact_id) if thread and thread.contact_id else None
-        if not contact or contact.contact_type != "client" or contact.do_not_contact:
+        if not contact or contact.contact_type not in {"client", "owner"} or contact.do_not_contact:
             return
 
         consent = db.scalar(select(ContactChannelConsent).where(
@@ -171,24 +172,43 @@ def process_whatsapp_inbound_message(message_id: int) -> None:
         if consent and consent.status in {"denied", "withdrawn"}:
             return
 
-        leads = db.scalars(select(Lead).where(
+        base_leads = select(Lead).where(
             Lead.status.notin_([LeadStatus.LOST, LeadStatus.SUPPRESSED])
-        ).order_by(Lead.updated_at.desc()).limit(500)).all()
-        ranked = []
-        for lead in leads:
-            match = score_client_property(contact, lead)
-            if match["score"] >= 35:
-                ranked.append(property_payload(lead, match))
-        ranked.sort(key=lambda item: item["score"], reverse=True)
-        top = ranked[:5]
-        crm_context = [{
-            "lead_id": item["lead_id"], "title": item["title"],
-            "municipality": item["municipality"], "district": item["district"],
-            "property_type": item["property_type"], "price": item["price"],
-            "area": item["area"], "bedrooms": item["bedrooms"],
-            "match_score": item["score"], "reason": item["explanation"],
-            "listing_url": item["source_url"],
-        } for item in top]
+        )
+        if contact.contact_type == "client":
+            leads = db.scalars(base_leads.order_by(Lead.updated_at.desc()).limit(500)).all()
+            ranked = []
+            for lead in leads:
+                match = score_client_property(contact, lead)
+                if match["score"] >= 35:
+                    ranked.append(property_payload(lead, match))
+            ranked.sort(key=lambda item: item["score"], reverse=True)
+            top = ranked[:5]
+            crm_context = [{
+                "lead_id": item["lead_id"], "title": item["title"],
+                "municipality": item["municipality"], "district": item["district"],
+                "property_type": item["property_type"], "price": item["price"],
+                "area": item["area"], "bedrooms": item["bedrooms"],
+                "match_score": item["score"], "reason": item["explanation"],
+                "listing_url": item["source_url"],
+            } for item in top]
+        else:
+            phone_digits = func.regexp_replace(Contact.phone, r"\\D", "", "g")
+            owner_clauses = []
+            if contact.email:
+                owner_clauses.append(func.lower(Lead.owner_email) == contact.email.strip().lower())
+            normalised_phone = _normalise_phone(contact.phone)
+            if normalised_phone:
+                owner_phone = func.regexp_replace(Lead.owner_phone, r"\\D", "", "g")
+                owner_clauses.extend([owner_phone == normalised_phone, owner_phone == "00" + normalised_phone])
+            linked = db.scalars(base_leads.where(or_(*owner_clauses)).limit(20)).all() if owner_clauses else []
+            top = [{"lead_id": lead.id} for lead in linked]
+            crm_context = [{
+                "lead_id": lead.id, "title": lead.title,
+                "municipality": lead.municipality, "district": lead.district,
+                "property_type": lead.property_type, "listing_url": lead.source_url,
+                "owner_identity_verified": False,
+            } for lead in linked]
 
         system_prompt = (
             "És o assistente de atendimento imobiliário do ThinkSmart AI em Portugal. "
