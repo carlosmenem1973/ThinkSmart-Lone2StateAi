@@ -15,6 +15,7 @@ from app.core.database import get_db
 from app.models.contact import Contact
 from app.models.entities import AuditLog, User, UserRole
 from app.models.communications import CommunicationChannel, CommunicationMessage, CommunicationThread, ContactChannelConsent
+from app.core.config import settings
 
 router = APIRouter(prefix="/communications", tags=["Communications"])
 CHANNELS = {"whatsapp", "sms", "email"}
@@ -28,6 +29,10 @@ class ConsentInput(BaseModel):
     evidence_source: str | None = Field(default=None, max_length=500)
     evidence_reference: str | None = Field(default=None, max_length=1000)
     expires_at: datetime | None = None
+
+class InboundChannelInput(BaseModel):
+    phone_number_id: str = Field(min_length=5, max_length=100)
+    enabled: bool = True
 
 class DraftInput(BaseModel):
     contact_id: int
@@ -96,6 +101,31 @@ def register_channel(payload: dict, admin: User = Depends(require_admin_user), d
         details={"channel": channel, "provider": provider, "account_scope": "central"}))
     db.commit()
     return {"id": row.id, "channel": row.channel, "provider": row.provider, "enabled": False, "ready": False}
+
+@router.put("/channels/{channel_id}/inbound")
+def configure_whatsapp_inbound(
+    channel_id: int,
+    payload: InboundChannelInput,
+    admin: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+):
+    row = db.get(CommunicationChannel, channel_id)
+    if not row or row.channel != "whatsapp" or row.provider != "meta_whatsapp_cloud":
+        raise HTTPException(status_code=404, detail="Meta WhatsApp channel not found")
+    if payload.enabled and (not settings.meta_whatsapp_app_secret or not settings.meta_whatsapp_verify_token):
+        raise HTTPException(status_code=503, detail="Configure META_WHATSAPP_APP_SECRET and META_WHATSAPP_VERIFY_TOKEN in AWS Secrets Manager first")
+    row.configuration_json = {**(row.configuration_json or {}), "phone_number_id": payload.phone_number_id}
+    row.enabled = payload.enabled
+    row.inbound_enabled = payload.enabled
+    # Outbound stays disabled until a separate send adapter and approval workflow are deployed.
+    row.outbound_enabled = False
+    db.add(AuditLog(actor_id=admin.id, action="communications.whatsapp_inbound_configured",
+        entity_type="communication_channel", entity_id=str(row.id),
+        details={"enabled": payload.enabled, "phone_number_id": payload.phone_number_id}))
+    db.commit()
+    return {"id": row.id, "channel": row.channel, "enabled": row.enabled,
+        "inbound_enabled": row.inbound_enabled, "outbound_enabled": row.outbound_enabled}
+
 
 @router.put("/contacts/{contact_id}/consent")
 def upsert_contact_consent(contact_id: int, payload: ConsentInput,
