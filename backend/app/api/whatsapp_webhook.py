@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -75,7 +76,7 @@ def _save_inbound_message(db: Session, message: dict[str, Any], value: dict[str,
 
     contact = db.scalar(select(Contact).where(
         Contact.active.is_(True),
-        func.regexp_replace(Contact.phone, r"\\D", "", "g") == wa_id,
+        func.regexp_replace(Contact.phone, r"\D", "", "g") == wa_id,
     ).order_by(Contact.id).limit(1))
 
     if contact:
@@ -247,7 +248,7 @@ def verify_webhook(
     hub_mode: str | None = Query(default=None, alias="hub.mode"),
     hub_verify_token: str | None = Query(default=None, alias="hub.verify_token"),
     hub_challenge: str | None = Query(default=None, alias="hub.challenge"),
-):
+): 
     if (
         hub_mode == "subscribe"
         and settings.meta_whatsapp_verify_token
@@ -255,7 +256,7 @@ def verify_webhook(
         and hmac.compare_digest(hub_verify_token, settings.meta_whatsapp_verify_token)
         and hub_challenge
     ):
-        return int(hub_challenge) if hub_challenge.isdigit() else hub_challenge
+        return PlainTextResponse(content=hub_challenge)
     raise HTTPException(status_code=403, detail="WhatsApp webhook verification failed")
 
 
