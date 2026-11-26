@@ -62,3 +62,38 @@
  .mode-switch{display:flex;flex-wrap:wrap}.mode-switch button{flex:1 1 150px}
  .agent-grid{grid-template-columns:minmax(0,1fr)}.branding-form{grid-template-columns:minmax(0,1fr)}
 }
+
+
+/* PR #20: omnichannel workspace embedded in the existing Contact AI menu. */
+.comm-panel{margin:18px 0;padding:18px}
+.comm-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 16px;border-bottom:1px solid #e7ebf0;padding-bottom:12px}
+.comm-tab{background:transparent;color:#526174;padding:9px 12px}
+.comm-tab.active{background:var(--brand-primary,#147d68);color:#fff}
+.comm-tab span{background:#fff;color:#16795f;border-radius:20px;padding:2px 7px;font-size:10px}
+.comm-layout{display:grid;grid-template-columns:minmax(220px,.85fr) minmax(0,1.5fr);gap:14px;min-width:0}
+.comm-thread-list,.comm-conversation{min-width:0;border:1px solid #e7ebf0;border-radius:10px;overflow:hidden;background:#fff}
+.comm-list-heading{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;background:#f8fafc;color:#526174;font-size:12px;font-weight:700}
+.comm-list-heading small{color:#8491a0}
+.comm-thread{display:grid;gap:5px;width:100%;border-radius:0;border-bottom:1px solid #edf0f3;background:#fff;color:#263548;text-align:left;padding:12px 14px}
+.comm-thread:hover,.comm-thread.selected{background:#f0f7f5;color:#173d35}
+.comm-thread-top{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.comm-thread-top b{font-size:12px;overflow-wrap:anywhere}
+.comm-thread-top small,.comm-thread-meta,.comm-thread-preview{font-size:10px;color:#8491a0}
+.comm-thread-meta{font-weight:700;letter-spacing:.4px}
+.comm-thread-preview{font-size:11px;line-height:1.4;overflow-wrap:anywhere}
+.comm-pending-label{justify-self:start;border-radius:20px;background:#fff4df;color:#93600b;padding:3px 7px;font-size:10px}
+.comm-conversation-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:13px 15px;border-bottom:1px solid #edf0f3}
+.comm-conversation-head>div{display:grid;gap:4px;min-width:0}
+.comm-conversation-head b{font-size:13px;overflow-wrap:anywhere}
+.comm-conversation-head small{font-size:10px;color:#8491a0}
+.comm-messages{display:grid;gap:12px;max-height:520px;overflow:auto;padding:14px;background:#fbfcfd}
+.comm-message{max-width:90%;padding:12px;border:1px solid #e7ebf0;border-radius:10px;background:#fff;min-width:0}
+.comm-message.inbound{justify-self:start}
+.comm-message.outbound{justify-self:end;background:#f0f7f5;border-color:#d8eee6}
+.comm-message-meta{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;font-size:10px;color:#64748b}
+.comm-message p{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.55;color:#263548}
+.comm-message>small{display:block;color:#8491a0;font-size:10px;margin:6px 0}
+.comm-message button{font-size:11px;padding:8px 10px}
+.comm-safety-note,.comm-role-note{display:flex;align-items:flex-start;gap:8px;margin-top:14px;color:#64748b;font-size:11px;line-height:1.5}
+.comm-safety-note svg{flex:0 0 auto;color:#16866c}
+@media(max-width:760px){.comm-layout{grid-template-columns:minmax(0,1fr)}.comm-thread-list{max-height:280px;overflow:auto}.comm-messages{max-height:420px}.comm-message{max-width:100%}.comm-tabs{gap:5px}.comm-tab{padding:8px 9px;font-size:11px}}
