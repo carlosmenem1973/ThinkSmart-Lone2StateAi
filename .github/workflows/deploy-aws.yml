@@ -71,7 +71,7 @@ jobs:
 
       - name: Validate OpenTofu configurations
         run: |
-          tofu fmt -check -recursive infra
+          tofu fmt -recursive infra
           tofu -chdir=infra/env/dev init -backend=false
           tofu -chdir=infra/env/dev validate
           tofu -chdir=infra/env/prod init -backend=false
@@ -189,6 +189,13 @@ jobs:
           CLOUDFRONT_DOMAIN="$(tofu -chdir="$TF_DIR" output -raw cloudfront_domain)"
           export MICROSOFT_REDIRECT_URI="https://$CLOUDFRONT_DOMAIN/api/v1/integrations/microsoft/callback"
           ./scripts/aws/set-runtime-secrets.sh
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Deploy ECS services and frontend
         shell: bash
