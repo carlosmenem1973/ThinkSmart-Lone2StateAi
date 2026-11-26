@@ -82,7 +82,7 @@ The second endpoint refuses activation unless the app secret and verify token ar
 ## Inbound processing and safety boundaries
 1. Meta webhook signature and configured phone number ID are validated.
 2. Each inbound message is deduplicated by the provider message ID and stored in the communications inbox.
-3. The sender is linked to an active CRM contact by digit-normalised phone number (including the Portuguese `00351` format). Unknown senders are stored in an unlinked thread; no CRM contact is auto-created.
+3. The sender is linked to an active CRM contact by digit-normalised phone number (including the Portuguese `00351` format) only when the phone identifies exactly one active CRM contact. Ambiguous/duplicate phone numbers and unknown senders are stored in an unlinked thread; no CRM contact is auto-created.
 4. For known clients, deterministic CRM matching ranks existing property leads using stored location, budget, property type, bedrooms, area and operation criteria.
 5. For known owners, existing leads are associated only by exact email or normalised phone; this does not verify legal ownership.
 6. Bedrock prepares a short response draft grounded in the CRM results. The draft is stored as `pending_approval` in the same thread. No WhatsApp message is sent.
