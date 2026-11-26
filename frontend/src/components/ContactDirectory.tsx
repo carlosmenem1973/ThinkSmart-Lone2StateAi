@@ -3,14 +3,16 @@ import { Archive, Building2, LoaderCircle, Plus, RefreshCw, Search, Upload, User
 
 type Contact={id:number;contact_type:'owner'|'client';full_name:string;email?:string|null;phone?:string|null;municipality?:string|null;district?:string|null;property_preferences?:string|null;budget_min?:number|null;budget_max?:number|null;source?:string|null;notes?:string|null;lawful_basis?:string|null;contact_permission:boolean;do_not_contact:boolean;active:boolean};
 type Props={apiFetch:(path:string,init?:RequestInit)=>Promise<Response>};
+const PAGE_SIZE=50;
 const blank:Omit<Contact,'id'>={contact_type:'owner',full_name:'',email:'',phone:'',municipality:'',district:'',property_preferences:'',budget_min:null,budget_max:null,source:'',notes:'',lawful_basis:'',contact_permission:false,do_not_contact:false,active:true};
 
 export default function ContactDirectory({apiFetch}:Props){
  const [items,setItems]=useState<Contact[]>([]);const [form,setForm]=useState(blank);const [editing,setEditing]=useState<number|null>(null);
- const [filter,setFilter]=useState<'all'|'owner'|'client'>('all');const [query,setQuery]=useState('');const [busy,setBusy]=useState(false);
+ const [filter,setFilter]=useState<'all'|'owner'|'client'>('all');const [query,setQuery]=useState('');const [busy,setBusy]=useState(false);const [page,setPage]=useState(1);const [total,setTotal]=useState(0);const [pages,setPages]=useState(0);
  const [message,setMessage]=useState('');const [error,setError]=useState('');const [csv,setCsv]=useState('');const [showImport,setShowImport]=useState(false);const [selected,setSelected]=useState<number[]>([]);
- const load=useCallback(async()=>{setBusy(true);setError('');try{const p=new URLSearchParams();if(filter!=='all')p.set('contact_type',filter);if(query.trim())p.set('q',query.trim());const r=await apiFetch('/contacts?'+p.toString());const d=await r.json();if(!r.ok)throw new Error(d?.detail||'Falha ao carregar contactos.');setItems(d);setSelected(old=>old.filter(id=>d.some((x:Contact)=>x.id===id)));}catch(e){setError(e instanceof Error?e.message:'Falha ao carregar contactos.');}finally{setBusy(false);}},[apiFetch,filter,query]);
+ const load=useCallback(async()=>{setBusy(true);setError('');try{const p=new URLSearchParams({page:String(page),page_size:String(PAGE_SIZE)});if(filter!=='all')p.set('contact_type',filter);if(query.trim())p.set('q',query.trim());const r=await apiFetch('/contacts/page?'+p.toString());const d=await r.json();if(!r.ok)throw new Error(d?.detail||'Falha ao carregar contactos.');setItems(d.items||[]);setTotal(d.total||0);setPages(d.pages||0);setSelected(old=>old.filter(id=>Number.isInteger(id)));}catch(e){setError(e instanceof Error?e.message:'Falha ao carregar contactos.');}finally{setBusy(false);}},[apiFetch,filter,query,page]);
  useEffect(()=>{void load();},[load]);
+ useEffect(()=>{if(pages>0&&page>pages)setPage(pages);},[page,pages]);
  const owners=items.filter(x=>x.contact_type==='owner').length;const clients=items.length-owners;
  async function save(e:FormEvent){e.preventDefault();setError('');setMessage('');try{const r=await apiFetch(editing?'/contacts/'+editing:'/contacts',{method:editing?'PATCH':'POST',body:JSON.stringify({...form,email:form.email||null,phone:form.phone||null,municipality:form.municipality||null,district:form.district||null,property_preferences:form.property_preferences||null,source:form.source||null,notes:form.notes||null,lawful_basis:form.lawful_basis||null})});const d=await r.json();if(!r.ok)throw new Error(d?.detail||'Não foi possível guardar.');setMessage(editing?'Contacto atualizado.':'Contacto criado.');setForm(blank);setEditing(null);await load();}catch(e){setError(e instanceof Error?e.message:'Erro ao guardar.');}}
  function edit(x:Contact){const {id,...rest}=x;setEditing(id);setForm({...blank,...rest});}
@@ -36,15 +38,25 @@ export default function ContactDirectory({apiFetch}:Props){
    <button type="submit"><Plus size={15}/>{editing?'Guardar alterações':'Adicionar contacto'}</button>{editing&&<button type="button" className="secondary" onClick={()=>{setEditing(null);setForm(blank);}}>Cancelar</button>}
   </form>
   <div className="panelhead"><div><h3>Lista de contactos</h3><p>Seleciona contactos para preparar a audiência do Agente de Procura.</p></div><button className="secondary" type="button" onClick={()=>void load()} disabled={busy}>{busy?<LoaderCircle className="spin" size={15}/>:<RefreshCw size={15}/>} Atualizar</button></div>
-  <div className="mode-switch"><button type="button" className={filter==='all'?'selected':''} onClick={()=>setFilter('all')}>Todos</button><button type="button" className={filter==='owner'?'selected':''} onClick={()=>setFilter('owner')}>Proprietários</button><button type="button" className={filter==='client'?'selected':''} onClick={()=>setFilter('client')}>Clientes</button></div>
-  <div className="property-query"><Search size={17}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Pesquisar por nome, email, telefone ou município"/></div>
+  <div className="mode-switch"><button type="button" className={filter==='all'?'selected':''} onClick={()=>{setFilter('all');setPage(1);}}>Todos</button><button type="button" className={filter==='owner'?'selected':''} onClick={()=>{setFilter('owner');setPage(1);}}>Proprietários</button><button type="button" className={filter==='client'?'selected':''} onClick={()=>{setFilter('client');setPage(1);}}>Clientes</button></div>
+  <div className="property-query"><Search size={17}/><input value={query} onChange={e=>{setQuery(e.target.value);setPage(1);}} placeholder="Pesquisar por nome, email, telefone ou município"/></div>
   <div className="tablewrap"><table><thead><tr><th></th><th>Contacto</th><th>Tipo</th><th>Localização</th><th>Preferências</th><th>Permissão</th><th>Ações</th></tr></thead><tbody>
-   {items.map(x=><tr key={x.id}><td><input type="checkbox" aria-label={'Selecionar '+x.full_name} checked={selected.includes(x.id)} onChange={e=>setSelected(old=>e.target.checked?[...old,x.id]:old.filter(id=>id!==x.id))}/></td>
+   {items.map(x=><tr key={x.id}><td><input type="checkbox" aria-label={'Selecionar '+x.full_name} checked={selected.includes(x.id)} disabled={!selected.includes(x.id)&&selected.length>=200} onChange={e=>setSelected(old=>e.target.checked?[...old,x.id]:old.filter(id=>id!==x.id))}/></td>
    <td><b>{x.full_name}</b><small>{x.email||'Sem email'} · {x.phone||'Sem telefone'}</small></td><td>{x.contact_type==='owner'?'Proprietário':'Cliente'}</td><td>{[x.municipality,x.district].filter(Boolean).join(', ')||'—'}</td>
    <td>{x.property_preferences||'—'}{x.budget_max?' · até '+x.budget_max.toLocaleString('pt-PT')+' €':''}</td><td>{x.do_not_contact?'Não contactar':x.contact_permission&&x.lawful_basis?'Documentada':'Por verificar'}</td>
    <td><button className="secondary" type="button" onClick={()=>edit(x)}>Editar</button><button className="secondary" type="button" onClick={()=>void archive(x.id)}><Archive size={14}/> Arquivar</button></td></tr>)}
    {!items.length&&<tr><td colSpan={7} className="empty">Sem contactos. Adiciona um contacto ou importa um CSV.</td></tr>}
   </tbody></table></div>
+  <div className="panelhead pagination-controls">
+   <p>A mostrar {total===0?0:(page-1)*PAGE_SIZE+1}–{Math.min(page*PAGE_SIZE,total)} de {total.toLocaleString('pt-PT')} contactos · {PAGE_SIZE} por página</p>
+   <div className="mode-switch">
+    <button type="button" className="secondary" disabled={busy||page<=1} onClick={()=>setPage(1)}>Primeira</button>
+    <button type="button" className="secondary" disabled={busy||page<=1} onClick={()=>setPage(p=>Math.max(1,p-1))}>Anterior</button>
+    <span>Página {pages===0?0:page} de {pages}</span>
+    <button type="button" className="secondary" disabled={busy||page>=pages} onClick={()=>setPage(p=>Math.min(pages,p+1))}>Seguinte</button>
+    <button type="button" className="secondary" disabled={busy||page>=pages} onClick={()=>setPage(pages)}>Última</button>
+   </div>
+  </div>
   <div className="panelhead"><p>{selected.length} selecionados · Os dados pessoais não são enviados ao modelo de IA.</p><button type="button" disabled={!selected.length} onClick={()=>void prepareAudience()}><Users size={15}/> Preparar audiência para Procura IA</button></div>
  </section>;
 }
