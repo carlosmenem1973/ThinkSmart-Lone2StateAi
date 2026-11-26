@@ -160,7 +160,7 @@ def create_message_draft(payload: DraftInput, user: User = Depends(get_business_
         CommunicationThread.contact_id == contact.id, CommunicationThread.channel == payload.channel,
         CommunicationThread.status == "open").order_by(desc(CommunicationThread.last_message_at)))
     if thread is None:
-        thread = CommunicationThread(contact_id=contact.id, channel=payload.channel, subject=payload.subject)
+        thread = CommunicationThread(contact_id=contact.id, channel=payload.channel, subject=payload.subject, assigned_to=user.id)
         db.add(thread)
         db.flush()
     message = CommunicationMessage(thread_id=thread.id, direction="outbound", actor_type="human",
