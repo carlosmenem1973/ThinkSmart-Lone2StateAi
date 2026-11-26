@@ -22,7 +22,7 @@ from app.models.communications import (
     CommunicationWebhookEvent,
     ContactChannelConsent,
 )
-from app.models.entities import Lead
+from app.models.entities import Lead, LeadStatus
 from app.services.ai import AIUnavailable, bedrock_generate
 from app.services.property_matching import property_payload, score_client_property
 
@@ -66,11 +66,11 @@ def _save_inbound_message(db: Session, message: dict[str, Any], value: dict[str,
         payload_hash=hashlib.sha256(json.dumps(message, sort_keys=True).encode()).hexdigest(),
         processed=False,
     )
-    db.add(event)
     try:
-        db.flush()
+        with db.begin_nested():
+            db.add(event)
+            db.flush()
     except IntegrityError:
-        db.rollback()
         return None
 
     contact = db.scalar(select(Contact).where(
@@ -171,7 +171,7 @@ def process_whatsapp_inbound_message(message_id: int) -> None:
             return
 
         leads = db.scalars(select(Lead).where(
-            Lead.status.notin_(["lost", "suppressed"])
+            Lead.status.notin_([LeadStatus.LOST, LeadStatus.SUPPRESSED])
         ).order_by(Lead.updated_at.desc()).limit(500)).all()
         ranked = []
         for lead in leads:
