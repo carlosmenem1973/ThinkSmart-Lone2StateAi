@@ -1,6 +1,6 @@
 """CRM matching endpoints for client/property and owner/property relationships."""
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_business_user
@@ -68,8 +68,7 @@ def match_properties_for_contact(
             clauses.append(Lead.owner_email.ilike(contact.email.strip()))
         phone = _normal_phone(contact.phone)
         if phone:
-            # Exact comparison after removing common punctuation is done in Python below.
-            clauses.append(Lead.owner_phone.is_not(None))
+            clauses.append(func.regexp_replace(Lead.owner_phone, r"\D", "", "g") == phone)
         if not clauses:
             return {"contact_id": contact.id, "contact_type": "owner", "matches": [], "note": "O proprietário não tem email ou telefone para associação determinística."}
         candidates = db.scalars(_lead_query(user).where(or_(*clauses)).limit(500)).all()
@@ -117,7 +116,7 @@ def match_contacts_for_property(
         if lead.owner_email:
             clauses.append(Contact.email.ilike(lead.owner_email.strip()))
         if lead.owner_phone:
-            clauses.append(Contact.phone.is_not(None))
+            clauses.append(func.regexp_replace(Contact.phone, r"\D", "", "g") == _normal_phone(lead.owner_phone))
         candidates = db.scalars(_contact_query(user).where(Contact.contact_type == "owner").where(or_(*clauses)).limit(500)).all() if clauses else []
         matches = []
         for contact in candidates:
