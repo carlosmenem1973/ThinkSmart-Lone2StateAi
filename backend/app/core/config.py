@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     cognito_app_client_id: str = ""
     frontend_origin: str = "http://localhost:5173"
 
+    # Meta WhatsApp Cloud API webhook (secrets must come from AWS Secrets Manager)
+    meta_whatsapp_verify_token: str = ""
+    meta_whatsapp_app_secret: str = ""
+    meta_whatsapp_phone_number_id: str = ""
+
     # Microsoft 365 integration
     microsoft_tenant_id: str = "common"
     microsoft_client_id: str = ""
