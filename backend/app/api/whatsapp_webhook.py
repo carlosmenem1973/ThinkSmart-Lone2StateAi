@@ -23,7 +23,7 @@ from app.models.communications import (
     CommunicationWebhookEvent,
     ContactChannelConsent,
 )
-from app.models.entities import Lead, LeadStatus
+from app.models.entities import Lead, LeadStatus, User, UserRole
 from app.services.ai import AIUnavailable, bedrock_generate
 from app.services.property_matching import property_payload, score_client_property
 
@@ -177,6 +177,9 @@ def process_whatsapp_inbound_message(message_id: int) -> None:
         base_leads = select(Lead).where(
             Lead.status.notin_([LeadStatus.LOST, LeadStatus.SUPPRESSED])
         )
+        assigned_user = db.get(User, contact.assigned_to or contact.created_by)
+        if assigned_user and assigned_user.role not in {UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.MANAGER}:
+            base_leads = base_leads.where(Lead.assigned_to == assigned_user.id)
         if contact.contact_type == "client":
             leads = db.scalars(base_leads.order_by(Lead.updated_at.desc()).limit(500)).all()
             ranked = []
