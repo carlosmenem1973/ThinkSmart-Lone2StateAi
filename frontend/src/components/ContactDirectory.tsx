@@ -48,7 +48,7 @@ export default function ContactDirectory({apiFetch}:Props){
    {!items.length&&<tr><td colSpan={7} className="empty">Sem contactos. Adiciona um contacto ou importa um CSV.</td></tr>}
   </tbody></table></div>
   <div className="panelhead pagination-controls">
-   <p>A mostrar {total===0?0:(page-1)*PAGE_SIZE+1}–{Math.min(page*PAGE_SIZE,total)} de {total.toLocaleString('pt-PT')} contactos · {pageSize} por página</p>
+   <p>A mostrar {total===0?0:(page-1)*PAGE_SIZE+1}–{Math.min(page*PAGE_SIZE,total)} de {total.toLocaleString('pt-PT')} contactos · {PAGE_SIZE} por página</p>
    <div className="mode-switch">
     <button type="button" className="secondary" disabled={busy||page<=1} onClick={()=>setPage(1)}>Primeira</button>
     <button type="button" className="secondary" disabled={busy||page<=1} onClick={()=>setPage(p=>Math.max(1,p-1))}>Anterior</button>
