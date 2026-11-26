@@ -38,7 +38,7 @@ def build_agent_matching_context(
     lead_id: int | None = None,
 ) -> str:
     """Return a bounded CRM matching summary. Never returns phone numbers or email addresses."""
-    if bool(contact_id) == bool(lead_id):
+    if (contact_id is None) == (lead_id is None) or (contact_id is not None and contact_id <= 0) or (lead_id is not None and lead_id <= 0):
         raise ValueError("Indique exatamente um contact_id ou lead_id.")
 
     if contact_id is not None:
@@ -68,7 +68,7 @@ def build_agent_matching_context(
                 clauses.append(func.lower(Lead.owner_email) == contact.email.strip().lower())
             phone = _phone(contact.phone)
             if phone:
-                clauses.append(func.regexp_replace(Lead.owner_phone, r"\\D", "", "g") == phone)
+                clauses.append(func.regexp_replace(Lead.owner_phone, r"\D", "", "g") == phone)
             leads = db.scalars(_lead_scope(user).where(or_(*clauses)).limit(100)).all() if clauses else []
             items = [{
                 "lead_id": lead.id, "title": lead.title,
