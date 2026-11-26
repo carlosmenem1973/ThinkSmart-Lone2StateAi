@@ -117,8 +117,8 @@ def upsert_contact_consent(contact_id: int, payload: ConsentInput,
     row.captured_at = now if payload.status == "granted" else row.captured_at
     row.captured_by = user.id
     row.revoked_at = now if payload.status in {"withdrawn", "denied"} else None
-    if payload.status in {"withdrawn", "denied"}:
-        contact.do_not_contact = True
+    # Channel-specific withdrawal is recorded here; the CRM-wide do_not_contact
+    # flag remains a separate global suppression control.
     db.add(AuditLog(actor_id=user.id, action="communications.consent_updated",
         entity_type="contact", entity_id=str(contact_id),
         details={"channel": payload.channel, "purpose": payload.purpose, "status": payload.status}))
