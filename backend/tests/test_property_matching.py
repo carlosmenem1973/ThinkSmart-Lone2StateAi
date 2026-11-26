@@ -45,3 +45,18 @@ def test_owner_and_client_matching_are_not_inferred_by_score():
     lead = SimpleNamespace(title="Moradia", property_type=None, municipality=None,
         district=None, property_data={})
     assert score_client_property(contact, lead)["score"] == 0
+
+
+def test_matches_requested_area_range():
+    contact = SimpleNamespace(
+        property_preferences="Moradia com área entre 100 a 140 m2",
+        municipality=None, district=None, budget_min=None, budget_max=None,
+    )
+    lead = SimpleNamespace(
+        title="Moradia T3", property_type="Moradia",
+        municipality=None, district=None,
+        property_data={"area_m2": 125, "property_type": "Moradia"},
+    )
+    result = score_client_property(contact, lead)
+    assert "area" in result["matched_on"]
+    assert result["score"] == 100
