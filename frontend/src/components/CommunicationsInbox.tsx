@@ -64,7 +64,10 @@ export default function CommunicationsInbox({ apiFetch, role }: Props) {
     catch (e) { setMessages([]); setError(e instanceof Error ? e.message : 'Não foi possível carregar a conversa.'); }
   }, [apiFetch]);
 
-  useEffect(() => { void loadInbox(); void loadPending(); }, [loadInbox, loadPending]);
+  useEffect(() => {
+    if (role === 'viewer') return;
+    void loadInbox(); void loadPending();
+  }, [loadInbox, loadPending, role]);
   useEffect(() => {
     if (selected !== null) void loadMessages(selected);
     else setMessages([]);
@@ -90,6 +93,7 @@ export default function CommunicationsInbox({ apiFetch, role }: Props) {
   }
 
   const selectedThread = threads.find(thread => thread.id === selected) ?? null;
+  if (role === 'viewer') return <section className="panel comm-panel"><p className="empty">A conta de consulta não tem acesso à caixa de entrada de comunicações.</p></section>;
   return <section className="panel comm-panel">
     <div className="panelhead">
       <div><h2><Inbox size={19}/> Caixa de entrada omnichannel</h2><p>Conversas recebidas, WhatsApp, Email e respostas preparadas para aprovação.</p></div>
