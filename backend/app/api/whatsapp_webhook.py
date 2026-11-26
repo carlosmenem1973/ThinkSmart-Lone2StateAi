@@ -77,10 +77,13 @@ def _save_inbound_message(db: Session, message: dict[str, Any], value: dict[str,
     except IntegrityError:
         return None
 
-    contact = db.scalar(select(Contact).where(
+    phone_digits = func.regexp_replace(Contact.phone, r"\D", "", "g")
+    phone_matches = db.scalars(select(Contact).where(
         Contact.active.is_(True),
-        func.regexp_replace(Contact.phone, r"\D", "", "g") == wa_id,
-    ).order_by(Contact.id).limit(1))
+        or_(phone_digits == wa_id, phone_digits == "00" + wa_id),
+    ).order_by(Contact.id).limit(2)).all()
+    # Never attach an inbound conversation to an arbitrary record when the phone is duplicated.
+    contact = phone_matches[0] if len(phone_matches) == 1 else None
 
     if contact:
         thread = db.scalar(select(CommunicationThread).where(
