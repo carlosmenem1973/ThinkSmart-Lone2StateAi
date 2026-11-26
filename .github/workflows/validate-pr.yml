@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - fix/pr5-voice-property-discovery-conflicts
+      - feature/omnichannel-communications-foundation
 
 permissions:
   contents: read
