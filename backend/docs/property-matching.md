@@ -14,7 +14,7 @@ Both sides enforce the current seller assignment scope. Admin/manager roles can 
 
 ## Scoring
 
-The deterministic 0-100 score uses available, explicitly stored criteria: municipality/district, price vs. budget, property type, bedrooms, and operation (buy/rent). Unknown values are reported as missing and are not fabricated. Only fields with a stated client criterion contribute to the denominator. A score is a ranking aid, not a guarantee of suitability.
+The deterministic 0-100 score uses available, explicitly stored criteria: municipality/district, price vs. budget, property type, bedrooms, requested area, and operation (buy/rent). Unknown values are reported as missing and are not fabricated. Only fields with a stated client criterion contribute to the denominator. A score is a ranking aid, not a guarantee of suitability.
 
 Owner linking uses exact email or digit-normalised phone. It only links CRM records; `owner_identity_verified` remains false because a matching contact record does not prove legal ownership.
 
