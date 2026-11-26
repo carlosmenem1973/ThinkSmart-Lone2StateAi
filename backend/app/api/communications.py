@@ -241,6 +241,35 @@ def list_thread_messages(thread_id: int, user: User = Depends(get_business_user)
         "status": m.status, "requires_approval": m.requires_approval, "approved_by": m.approved_by,
         "approved_at": m.approved_at, "sent_at": m.sent_at, "created_at": m.created_at} for m in rows]
 
+@router.get("/drafts/pending")
+def list_pending_message_drafts(user: User = Depends(get_business_user), db: Session = Depends(get_db)):
+    """List pending human-approval drafts visible to the authenticated user."""
+    if user.role == UserRole.VIEWER:
+        raise HTTPException(status_code=403, detail="Viewer accounts cannot access communications")
+    query = (
+        select(CommunicationMessage, CommunicationThread, Contact)
+        .join(CommunicationThread, CommunicationMessage.thread_id == CommunicationThread.id)
+        .outerjoin(Contact, CommunicationThread.contact_id == Contact.id)
+        .where(CommunicationMessage.status == "pending_approval")
+        .order_by(desc(CommunicationMessage.created_at))
+        .limit(100)
+    )
+    if user.role == UserRole.SELLER:
+        query = query.where(CommunicationThread.assigned_to == user.id)
+    rows = db.execute(query).all()
+    return [{
+        "message_id": message.id,
+        "thread_id": thread.id,
+        "contact_id": thread.contact_id,
+        "contact_name": contact.full_name if contact else None,
+        "channel": thread.channel,
+        "subject": thread.subject,
+        "body": message.body,
+        "created_at": message.created_at,
+        "requires_approval": message.requires_approval,
+    } for message, thread, contact in rows]
+
+
 @router.post("/drafts/{message_id}/approve")
 def approve_message_draft(message_id: int, admin: User = Depends(require_admin_user), db: Session = Depends(get_db)):
     message = db.get(CommunicationMessage, message_id)
