@@ -97,3 +97,24 @@ Outbound sending remains disabled. Approving a draft records approval but does n
 
 ## Database migration
 The communications models and Alembic migration `0009_communications` are part of this PR branch. Apply and validate the migration against a disposable PostgreSQL database before deploying the API. No new database table was added for the WhatsApp webhook increment; it reuses the existing communications tables and webhook idempotency ledger.
+
+
+## Portal UI — Contact AI
+
+The existing portal navigation is unchanged. The omnichannel workspace is embedded inside the existing **Contact AI** section; no new sidebar item or portal redesign is introduced.
+
+The workspace provides internal tabs for:
+- **Conversas**: recent communication threads.
+- **WhatsApp**: threads received through the Meta inbound webhook.
+- **Email**: email-channel threads (when available).
+- **Aprovações**: pending response drafts requiring human review.
+
+The frontend uses the authenticated API routes:
+- `GET /api/v1/communications/inbox`
+- `GET /api/v1/communications/inbox/{thread_id}/messages`
+- `GET /api/v1/communications/drafts/pending`
+- `POST /api/v1/communications/drafts/{message_id}/approve`
+
+The pending-drafts endpoint is permission-scoped: sellers only see drafts assigned to their threads; administrators and managers can see workspace drafts; viewer accounts are denied. Approval is administrator-only.
+
+**Important:** approving a draft records the approval and audit event only. It does not send a WhatsApp or email message. Outbound delivery remains disabled until provider send adapters and the corresponding safeguards are implemented.
