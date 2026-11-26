@@ -151,7 +151,7 @@ def _save_inbound_message(db: Session, message: dict[str, Any], value: dict[str,
     event.processed = True
     event.processed_at = datetime.now(timezone.utc)
     db.flush()
-    return inbound.id if contact and contact.contact_type == "client" and msg_type in {"text", "button", "interactive"} else None
+    return inbound.id if contact and contact.contact_type in {"client", "owner"} and msg_type in {"text", "button", "interactive"} else None
 
 
 def process_whatsapp_inbound_message(message_id: int) -> None:
