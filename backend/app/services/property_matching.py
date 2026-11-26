@@ -168,6 +168,24 @@ def score_client_property(contact: Contact, lead: Lead) -> dict:
         else:
             missing.append("bedrooms_unknown")
 
+    area_range = re.search(r"\b(\d{2,4})\s*(?:a|ate|-)\s*(\d{2,4})\s*m2\b", client["preferences"])
+    area_single = re.search(r"\b(\d{2,4})\s*m2\b", client["preferences"])
+    if area_range or area_single:
+        weight += 10
+        if prop["area"] is not None:
+            if area_range:
+                low_area, high_area = sorted((float(area_range.group(1)), float(area_range.group(2))))
+            else:
+                low_area = float(area_single.group(1))
+                high_area = float("inf")
+            if low_area <= prop["area"] <= high_area:
+                score += 10
+                matched.append("area")
+            else:
+                missing.append("area")
+        else:
+            missing.append("area_unknown")
+
     # If a client explicitly states buy/rent, compare it with the listing operation.
     wants_rent = any(word in client["preferences"] for word in ("arrendar", "arrendamento", "alugar", "rent"))
     wants_buy = any(word in client["preferences"] for word in ("comprar", "compra", "buy"))
@@ -194,7 +212,7 @@ def _explain(matched: list[str], missing: list[str]) -> str:
     labels = {
         "municipality": "localização", "district": "distrito", "budget": "orçamento",
         "budget_near": "orçamento próximo", "property_type": "tipo de imóvel",
-        "bedrooms": "tipologia", "operation": "tipo de operação",
+        "bedrooms": "tipologia", "area": "área", "operation": "tipo de operação",
     }
     positives = [labels.get(item, item) for item in matched]
     gaps = [labels.get(item, item) for item in missing if not item.endswith("_unknown")]
