@@ -141,22 +141,14 @@ jobs:
             -backend-config="encrypt=true" \
             -backend-config="use_lockfile=true"
 
-      - name: Bootstrap infrastructure and ECR
+      - name: Verify existing infrastructure state
         shell: bash
         run: |
           set -euo pipefail
           TF_DIR="infra/env/$TARGET_ENV"
-          export TF_VAR_gitlab_oidc_provider_arn="$GITLAB_OIDC_PROVIDER_ARN"
-          export TF_VAR_gitlab_subject="$GITLAB_OIDC_SUBJECT"
-          export TF_VAR_certificate_arn="${CERTIFICATE_ARN:-}"
-          export TF_VAR_api_origin_domain_name="${API_ORIGIN_DOMAIN_NAME:-}"
-          export TF_VAR_route53_zone_id="${ROUTE53_ZONE_ID:-}"
-          tofu -chdir="$TF_DIR" apply -auto-approve \
-            -var="api_image_tag=bootstrap" \
-            -var="api_desired_count=0" \
-            -var="worker_desired_count=0" \
-            -var="gitlab_oidc_provider_arn=$GITLAB_OIDC_PROVIDER_ARN" \
-            -var="gitlab_subject=$GITLAB_OIDC_SUBJECT"
+          tofu -chdir="$TF_DIR" output -raw api_ecr_url >/dev/null
+          tofu -chdir="$TF_DIR" output -raw worker_ecr_url >/dev/null
+          tofu -chdir="$TF_DIR" output -raw cloudfront_distribution_id >/dev/null
 
       - name: Build and push API and worker images
         shell: bash
