@@ -123,7 +123,7 @@ export default function CommunicationsInbox({ apiFetch, role }: Props) {
             {messages.map(item => <article key={item.id} className={item.direction === 'outbound' ? 'comm-message outbound' : 'comm-message inbound'}>
               <div className="comm-message-meta"><b>{item.direction === 'outbound' ? 'Resposta preparada' : 'Mensagem recebida'}</b><span>{dateLabel(item.created_at)}</span></div>
               <p>{item.body}</p>
-              <small>Estado: {item.status.replaceAll('_', ' ')}</small>
+              <small>Estado: {item.status.replace(/_/g, ' ')}</small>
               {item.status === 'pending_approval' && admin && <button disabled={busy} onClick={() => void approve(item.id)}><CheckCircle2 size={15}/> Aprovar resposta</button>}
             </article>)}
             {!messages.length && <p className="empty">Seleciona uma conversa para consultar as mensagens.</p>}
