@@ -2,7 +2,7 @@ import csv
 import io
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 from app.core.auth import get_business_user
 from app.core.database import get_db
@@ -108,6 +108,85 @@ def import_contacts(payload: dict, db: Session = Depends(get_db), user: User = D
     except HTTPException: raise
     except Exception as exc:
         db.rollback(); raise HTTPException(422, f"Não foi possível importar o CSV ({type(exc).__name__}).")
+
+
+@router.post("/import/update")
+def update_contacts_from_csv(payload: dict, db: Session = Depends(get_db), user: User = Depends(get_business_user)):
+    """Update only email and phone for uniquely matched existing contacts."""
+    if user.role == UserRole.VIEWER:
+        raise HTTPException(403, "A conta tem acesso apenas de consulta.")
+    raw = payload.get("csv")
+    if not isinstance(raw, str) or len(raw) > 1_000_000:
+        raise HTTPException(413, "CSV inválido ou superior a 1 MB.")
+    try:
+        reader = csv.DictReader(io.StringIO(raw.lstrip("\ufeff")))
+        required = {"contact_type", "full_name"}
+        fields = {"email": 320, "phone": 80}
+        if not reader.fieldnames or not required.issubset(set(reader.fieldnames)):
+            raise HTTPException(422, "O CSV tem de incluir contact_type e full_name.")
+        requested_fields = set(fields).intersection(reader.fieldnames)
+        if not requested_fields:
+            raise HTTPException(422, "O CSV tem de incluir email e/ou phone.")
+        updated = unchanged = not_found = ambiguous = invalid = 0
+        for row in reader:
+            kind = (row.get("contact_type") or "").strip().lower()
+            name = (row.get("full_name") or "").strip()
+            if kind not in {"owner", "client"} or len(name) < 2:
+                invalid += 1
+                continue
+            matches = db.scalars(
+                _scope(
+                    select(Contact).where(
+                        Contact.contact_type == kind,
+                        func.lower(Contact.full_name) == name.lower(),
+                    ),
+                    user,
+                )
+            ).all()
+            if not matches:
+                not_found += 1
+                continue
+            if len(matches) != 1:
+                ambiguous += 1
+                continue
+            contact = matches[0]
+            values = {}
+            row_invalid = False
+            for field in requested_fields:
+                value = (row.get(field) or "").strip()
+                if not value:
+                    continue
+                if len(value) > fields[field]:
+                    row_invalid = True
+                    break
+                values[field] = value.lower() if field == "email" else value
+            if row_invalid:
+                invalid += 1
+                continue
+            changed = False
+            for field, value in values.items():
+                if getattr(contact, field) != value:
+                    setattr(contact, field, value)
+                    changed = True
+            if changed:
+                updated += 1
+            else:
+                unchanged += 1
+        _audit(
+            db, user, "contacts.email_phone_updated", "batch",
+            {"updated": updated, "unchanged": unchanged, "not_found": not_found,
+             "ambiguous": ambiguous, "invalid": invalid},
+        )
+        db.commit()
+        return {
+            "updated": updated, "unchanged": unchanged, "not_found": not_found,
+            "ambiguous": ambiguous, "invalid": invalid,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(422, f"Não foi possível atualizar os contactos ({type(exc).__name__}).")
 
 @router.post("/agent-audience")
 def get_agent_audience(payload: dict, db: Session = Depends(get_db), user: User = Depends(get_business_user)):
