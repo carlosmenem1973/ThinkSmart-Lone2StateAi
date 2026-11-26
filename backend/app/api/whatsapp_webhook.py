@@ -52,6 +52,8 @@ def _channel_ready(db: Session, phone_number_id: str) -> bool:
         CommunicationChannel.inbound_enabled.is_(True),
     ))
     configured_id = (channel.configuration_json or {}).get("phone_number_id") if channel else None
+    if settings.meta_whatsapp_phone_number_id and not hmac.compare_digest(settings.meta_whatsapp_phone_number_id, phone_number_id):
+        return False
     return bool(channel and configured_id and hmac.compare_digest(str(configured_id), phone_number_id))
 
 
@@ -164,12 +166,12 @@ def process_whatsapp_inbound_message(message_id: int) -> None:
         if not contact or contact.contact_type not in {"client", "owner"} or contact.do_not_contact:
             return
 
-        consent = db.scalar(select(ContactChannelConsent).where(
+        consents = db.scalars(select(ContactChannelConsent).where(
             ContactChannelConsent.contact_id == contact.id,
             ContactChannelConsent.channel == "whatsapp",
-            ContactChannelConsent.purpose.in_([ "service", "property_enquiry" ]),
-        ))
-        if consent and consent.status in {"denied", "withdrawn"}:
+            ContactChannelConsent.purpose.in_(["service", "property_enquiry"]),
+        )).all()
+        if any(row.status in {"denied", "withdrawn"} for row in consents):
             return
 
         base_leads = select(Lead).where(
@@ -193,7 +195,6 @@ def process_whatsapp_inbound_message(message_id: int) -> None:
                 "listing_url": item["source_url"],
             } for item in top]
         else:
-            phone_digits = func.regexp_replace(Contact.phone, r"\\D", "", "g")
             owner_clauses = []
             if contact.email:
                 owner_clauses.append(func.lower(Lead.owner_email) == contact.email.strip().lower())
