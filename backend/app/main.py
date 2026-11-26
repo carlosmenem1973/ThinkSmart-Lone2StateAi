@@ -12,6 +12,7 @@ from app.api.routes import router
 from app.api.contact_ai import router as contact_ai_router
 from app.api.contacts import router as contacts_router
 from app.api.communications import router as communications_router
+from app.api.matching import router as matching_router
 from app.api.analytics import router as analytics_router
 
 
@@ -58,6 +59,7 @@ app.include_router(router, prefix="/api/v1")
 app.include_router(contact_ai_router, prefix="/api/v1")
 app.include_router(contacts_router, prefix="/api/v1")
 app.include_router(communications_router, prefix="/api/v1")
+app.include_router(matching_router, prefix="/api/v1")
 app.include_router(analytics_router, prefix="/api/v1")
 
 
