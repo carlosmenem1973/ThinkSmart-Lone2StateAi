@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import CommunicationsInbox from './CommunicationsInbox';
 import { Bot, Pause, Play, Trash2, RefreshCw, MessageCircle, ShieldCheck, Search } from 'lucide-react';
 
 type Props = { apiFetch: (path: string, init?: RequestInit) => Promise<Response>; role: string };
@@ -106,6 +107,7 @@ export default function ContactAIPanel({ apiFetch, role }: Props) {
     {!admin && <div className="auth-error">A gestão do agente está disponível apenas para administradores.</div>}
     {error && <div className="auth-error">{error}</div>}
     {message && <p className="branding-message">{message}</p>}
+    <CommunicationsInbox apiFetch={apiFetch} role={role} />
     {settings && <>
       <div className="stats">
         <div className="stat"><small>Estado</small><strong>{settings.paused ? 'Pausado' : settings.enabled ? 'Ativo' : 'Desativado'}</strong></div>
