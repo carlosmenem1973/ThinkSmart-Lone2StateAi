@@ -53,6 +53,56 @@ def list_contacts(contact_type: str | None = Query(default=None, pattern="^(owne
         statement = statement.where(or_(Contact.full_name.ilike(pattern), Contact.email.ilike(pattern), Contact.phone.ilike(pattern), Contact.municipality.ilike(pattern)))
     return db.scalars(statement).all()
 
+@router.get("/page")
+def list_contacts_page(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
+    contact_type: str | None = Query(default=None, pattern="^(owner|client)$"),
+    q: str | None = Query(default=None, max_length=160),
+    active: bool | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_business_user),
+):
+    """Return a database-paginated contact directory without the legacy 500-row cap."""
+    filters = []
+    if contact_type:
+        filters.append(Contact.contact_type == contact_type)
+    if active is not None:
+        filters.append(Contact.active.is_(active))
+    if q and q.strip():
+        pattern = f"%{q.strip()}%"
+        filters.append(or_(
+            Contact.full_name.ilike(pattern),
+            Contact.email.ilike(pattern),
+            Contact.phone.ilike(pattern),
+            Contact.municipality.ilike(pattern),
+        ))
+
+    count_statement = _scope(select(func.count(Contact.id)), user)
+    rows_statement = _scope(select(Contact), user)
+    for criterion in filters:
+        count_statement = count_statement.where(criterion)
+        rows_statement = rows_statement.where(criterion)
+
+    total = db.scalar(count_statement) or 0
+    pages = (total + page_size - 1) // page_size
+    offset = (page - 1) * page_size
+    rows = db.scalars(
+        rows_statement.order_by(Contact.updated_at.desc(), Contact.id.desc())
+        .offset(offset)
+        .limit(page_size)
+    ).all()
+    return {
+        "items": rows,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": pages,
+        "has_previous": page > 1,
+        "has_next": page < pages,
+    }
+
+
 @router.post("", response_model=ContactOut, status_code=201)
 def create_contact(payload: ContactInput, db: Session = Depends(get_db), user: User = Depends(get_business_user)):
     if user.role == UserRole.VIEWER: raise HTTPException(403, "A conta tem acesso apenas de consulta.")
