@@ -75,7 +75,7 @@ jobs:
           engine = create_engine(settings.database_url)
           with engine.connect() as connection:
               revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-          assert revision == "0009_communications", revision
+          assert revision == "0010_communications_outbox", revision
           print(f"Database migration reached {revision}")
           PY
       - name: Verify downgrade and re-upgrade
