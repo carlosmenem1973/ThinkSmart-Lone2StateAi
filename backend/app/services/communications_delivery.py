@@ -5,6 +5,7 @@ import re
 
 import boto3
 import httpx
+import msal
 
 from app.core.config import settings
 
@@ -90,3 +91,54 @@ def send_email_ses(destination: str, subject: str, body: str) -> str:
     if not message_id:
         raise DeliveryError("ses_missing_message_id", ambiguous=True)
     return str(message_id)
+
+
+def send_email_microsoft_graph(destination: str, subject: str, body: str) -> str:
+    """Send through a tenant mailbox using Graph application permissions.
+
+    Requires tenant-specific client credentials and the Microsoft Graph
+    Mail.Send application permission with administrator consent.
+    """
+    tenant = (settings.microsoft_tenant_id or "").strip()
+    client_id = (settings.microsoft_client_id or "").strip()
+    client_secret = settings.microsoft_client_secret or ""
+    sender = (settings.microsoft_graph_sender or "").strip()
+    if not tenant or tenant.lower() == "common" or not client_id or not client_secret or not sender:
+        raise DeliveryError("microsoft_graph_sender_not_configured")
+    try:
+        app = msal.ConfidentialClientApplication(
+            client_id,
+            authority=f"https://login.microsoftonline.com/{tenant}",
+            client_credential=client_secret,
+        )
+        token_result = app.acquire_token_for_client(scopes=["https://graph.microsoft.com/.default"])
+        access_token = token_result.get("access_token")
+        if not access_token:
+            error = str(token_result.get("error") or "token_error")[:60]
+            raise DeliveryError(f"microsoft_graph_auth_{error}")
+        response = httpx.post(
+            f"https://graph.microsoft.com/v1.0/users/{sender}/sendMail",
+            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+            json={
+                "message": {
+                    "subject": subject[:998],
+                    "body": {"contentType": "Text", "content": body},
+                    "toRecipients": [{"emailAddress": {"address": destination}}],
+                },
+                "saveToSentItems": True,
+            },
+            timeout=30.0,
+        )
+        response.raise_for_status()
+    except DeliveryError:
+        raise
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        raise DeliveryError(f"microsoft_graph_http_{status}", ambiguous=status >= 500) from exc
+    except (httpx.HTTPError, ValueError) as exc:
+        raise DeliveryError("microsoft_graph_transport_error", ambiguous=True) from exc
+    except Exception as exc:
+        # Do not expose access tokens, provider payloads or mailbox details.
+        raise DeliveryError("microsoft_graph_send_failed", ambiguous=True) from exc
+    # Graph sendMail normally returns 202 Accepted without a message ID.
+    return f"graph-accepted-{int(__import__('time').time())}"
