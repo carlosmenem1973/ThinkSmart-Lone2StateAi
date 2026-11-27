@@ -16,10 +16,11 @@ from app.models.contact import Contact
 from app.models.entities import AuditLog, User, UserRole
 from app.models.communications import CommunicationChannel, CommunicationMessage, CommunicationThread, ContactChannelConsent
 from app.core.config import settings
+from app.services.communications_delivery import DeliveryError, send_email_ses, send_whatsapp_text
 
 router = APIRouter(prefix="/communications", tags=["Communications"])
 CHANNELS = {"whatsapp", "sms", "email"}
-PROVIDERS = {"meta_whatsapp_cloud", "aws_end_user_messaging", "microsoft_graph"}
+PROVIDERS = {"meta_whatsapp_cloud", "aws_end_user_messaging", "microsoft_graph", "aws_ses"}
 
 class ConsentInput(BaseModel):
     channel: Literal["whatsapp", "sms", "email"]
@@ -82,7 +83,7 @@ def register_channel(payload: dict, admin: User = Depends(require_admin_user), d
         raise HTTPException(status_code=422, detail="Unsupported channel")
     if provider not in PROVIDERS:
         raise HTTPException(status_code=422, detail="Unsupported provider")
-    expected = {"whatsapp": "meta_whatsapp_cloud", "sms": "aws_end_user_messaging", "email": "microsoft_graph"}
+    expected = {"whatsapp": "meta_whatsapp_cloud", "sms": "aws_end_user_messaging", "email": provider if provider == "aws_ses" else "microsoft_graph"}
     if expected[channel] != provider:
         raise HTTPException(status_code=422, detail="Provider does not match channel")
     if not display_name:
@@ -127,7 +128,45 @@ def configure_whatsapp_inbound(
         "inbound_enabled": row.inbound_enabled, "outbound_enabled": row.outbound_enabled}
 
 
+class OutboundChannelInput(BaseModel):
+    enabled: bool = True
+
+
+@router.put("/channels/{channel_id}/outbound")
+def configure_channel_outbound(
+    channel_id: int,
+    payload: OutboundChannelInput,
+    admin: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+):
+    row = db.get(CommunicationChannel, channel_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Communication channel not found")
+    if payload.enabled:
+        if row.channel == "whatsapp" and row.provider == "meta_whatsapp_cloud":
+            if not settings.meta_whatsapp_access_token or not settings.meta_whatsapp_phone_number_id:
+                raise HTTPException(status_code=503, detail="Configure META_WHATSAPP_ACCESS_TOKEN and META_WHATSAPP_PHONE_NUMBER_ID in AWS Secrets Manager first")
+            row.configuration_json = {**(row.configuration_json or {}), "phone_number_id": settings.meta_whatsapp_phone_number_id}
+        elif row.channel == "email" and row.provider == "aws_ses":
+            sender = (settings.email_from_address or "").strip().lower()
+            if not sender or not settings.ses_sender_verified:
+                raise HTTPException(status_code=503, detail="Verify the SES sender identity and set SES_SENDER_VERIFIED=true after DNS verification")
+            if (row.sender_identifier or "").strip().lower() != sender:
+                raise HTTPException(status_code=409, detail="Channel sender_identifier must match EMAIL_FROM_ADDRESS")
+        else:
+            raise HTTPException(status_code=422, detail="Outbound provider is not supported")
+    row.enabled = payload.enabled
+    row.outbound_enabled = payload.enabled
+    db.add(AuditLog(actor_id=admin.id, action="communications.channel_outbound_configured",
+        entity_type="communication_channel", entity_id=str(row.id),
+        details={"channel": row.channel, "provider": row.provider, "enabled": payload.enabled}))
+    db.commit()
+    return {"id": row.id, "channel": row.channel, "provider": row.provider,
+        "enabled": row.enabled, "outbound_enabled": row.outbound_enabled}
+
+
 @router.put("/contacts/{contact_id}/consent")
+
 def upsert_contact_consent(contact_id: int, payload: ConsentInput,
     user: User = Depends(get_business_user), db: Session = Depends(get_db)):
     contact = db.get(Contact, contact_id)
@@ -272,14 +311,91 @@ def list_pending_message_drafts(user: User = Depends(get_business_user), db: Ses
 
 @router.post("/drafts/{message_id}/approve")
 def approve_message_draft(message_id: int, admin: User = Depends(require_admin_user), db: Session = Depends(get_db)):
-    message = db.get(CommunicationMessage, message_id)
+    message = db.scalar(
+        select(CommunicationMessage).where(CommunicationMessage.id == message_id).with_for_update()
+    )
     if not message or message.status != "pending_approval":
         raise HTTPException(status_code=404, detail="Pending draft not found")
-    message.status = "approved"
+    thread = db.get(CommunicationThread, message.thread_id)
+    contact = db.get(Contact, thread.contact_id) if thread and thread.contact_id else None
+    if not thread or not contact:
+        raise HTTPException(status_code=409, detail="A linked CRM contact is required before sending")
+    if contact.do_not_contact:
+        raise HTTPException(status_code=409, detail="Contact is globally suppressed (do_not_contact)")
+    purpose = str((message.metadata_json or {}).get("purpose") or "service")
+    consent = _consent_for(db, contact.id, thread.channel, purpose)
+    now = datetime.now(timezone.utc)
+    if purpose == "marketing" and (not consent or consent.status != "granted" or (consent.expires_at and consent.expires_at <= now)):
+        raise HTTPException(status_code=403, detail="Valid channel-specific marketing consent is required")
+    if consent and (consent.status in {"denied", "withdrawn"} or (consent.expires_at and consent.expires_at <= now)):
+        raise HTTPException(status_code=403, detail="Contact consent is denied, withdrawn or expired")
+
+    channel = db.scalar(select(CommunicationChannel).where(
+        CommunicationChannel.channel == thread.channel,
+        CommunicationChannel.enabled.is_(True),
+        CommunicationChannel.outbound_enabled.is_(True),
+    ).order_by(CommunicationChannel.id.desc()))
+    if not channel:
+        raise HTTPException(status_code=503, detail=f"No enabled outbound {thread.channel} channel is configured")
+
+    destination = contact.phone if thread.channel == "whatsapp" else contact.email
+    if not destination:
+        raise HTTPException(status_code=422, detail=f"Contact has no destination for {thread.channel}")
+
+    if thread.channel == "whatsapp":
+        if channel.provider != "meta_whatsapp_cloud":
+            raise HTTPException(status_code=409, detail="Unsupported WhatsApp outbound provider")
+        last_inbound = db.scalar(select(CommunicationMessage).where(
+            CommunicationMessage.thread_id == thread.id,
+            CommunicationMessage.direction == "inbound",
+        ).order_by(desc(CommunicationMessage.created_at)).limit(1))
+        if not last_inbound or (now - last_inbound.created_at).total_seconds() >= 24 * 60 * 60:
+            raise HTTPException(status_code=409, detail="WhatsApp customer-service window is closed; approved message templates are not yet implemented")
+    elif thread.channel == "email":
+        if channel.provider != "aws_ses":
+            raise HTTPException(status_code=409, detail="Email outbound must use AWS SES")
+    else:
+        raise HTTPException(status_code=422, detail="Outbound delivery for this channel is not implemented")
+
+    message.status = "sending"
     message.approved_by = admin.id
-    message.approved_at = datetime.now(timezone.utc)
-    db.add(AuditLog(actor_id=admin.id, action="communications.message_approved",
-        entity_type="communication_message", entity_id=str(message.id), details={"delivery_started": False}))
+    message.approved_at = now
+    message.metadata_json = {**(message.metadata_json or {}), "provider": channel.provider, "delivery_started": True}
     db.commit()
-    return {"message_id": message.id, "status": "approved", "sent": False,
-        "note": "Approved and audited; provider delivery is not enabled yet."}
+
+    try:
+        if thread.channel == "whatsapp":
+            provider_message_id = send_whatsapp_text(str(destination), message.body)
+        else:
+            provider_message_id = send_email_ses(
+                str(destination),
+                message.subject or thread.subject or "Mensagem ThinkSmart AI",
+                message.body,
+            )
+    except DeliveryError as exc:
+        message.status = "failed"
+        message.error_code = exc.code[:100]
+        message.metadata_json = {**(message.metadata_json or {}), "delivery_started": False}
+        db.add(AuditLog(actor_id=admin.id, action="communications.message_send_failed",
+            entity_type="communication_message", entity_id=str(message.id),
+            details={"channel": thread.channel, "provider": channel.provider, "error_code": exc.code[:100]}))
+        db.commit()
+        raise HTTPException(status_code=502, detail="Provider rejected the message; the failure was recorded")
+    except Exception:
+        message.status = "failed"
+        message.error_code = "provider_unexpected_error"
+        db.add(AuditLog(actor_id=admin.id, action="communications.message_send_failed",
+            entity_type="communication_message", entity_id=str(message.id),
+            details={"channel": thread.channel, "provider": channel.provider, "error_code": "provider_unexpected_error"}))
+        db.commit()
+        raise HTTPException(status_code=502, detail="Message delivery failed; the failure was recorded")
+
+    message.status = "sent"
+    message.provider_message_id = provider_message_id
+    message.sent_at = datetime.now(timezone.utc)
+    db.add(AuditLog(actor_id=admin.id, action="communications.message_sent",
+        entity_type="communication_message", entity_id=str(message.id),
+        details={"channel": thread.channel, "provider": channel.provider, "provider_message_id": provider_message_id}))
+    db.commit()
+    return {"message_id": message.id, "status": message.status, "sent": True,
+        "provider_message_id": provider_message_id, "sent_at": message.sent_at}
