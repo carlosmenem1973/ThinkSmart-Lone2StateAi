@@ -1,0 +1,183 @@
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+
+stages:
+  - validate
+  - deploy_dev
+  - deploy_prod
+
+variables:
+  AWS_REGION: "eu-west-1"
+  TOFU_VERSION: "1.10.6"
+  DOCKER_HOST: "tcp://docker:2376"
+  DOCKER_TLS_CERTDIR: "/certs"
+  DOCKER_TLS_VERIFY: "1"
+  DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
+
+validate_infrastructure:
+  stage: validate
+  image: alpine:3.21
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+  script:
+    - apk add --no-cache curl unzip
+    - curl -fsSLo /tmp/tofu.zip "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip"
+    - unzip -o /tmp/tofu.zip -d /usr/local/bin
+    - tofu fmt -recursive infra
+    - tofu -chdir=infra/env/dev init -backend=false
+    - tofu -chdir=infra/env/dev validate
+    - tofu -chdir=infra/env/prod init -backend=false
+    - tofu -chdir=infra/env/prod validate
+
+validate_frontend:
+  stage: validate
+  image: node:22-alpine
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+  script:
+    - cd frontend
+    - npm ci --no-audit --no-fund
+    - npm run build
+
+validate_backend_syntax:
+  stage: validate
+  image: python:3.12-slim
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+  script:
+    - python -m pip install --no-cache-dir -r backend/requirements.txt
+    - python -m compileall -q backend/app
+    - PYTHONPATH=backend python -c "from app.main import app; from app.agents.registry import AGENTS; from app.services.ai import bedrock_runtime_client, agentcore_client; assert len(AGENTS) == 6; assert 'Converse' in bedrock_runtime_client().meta.service_model.operation_names; assert 'InvokeWebSearch' in agentcore_client().meta.service_model.operation_names; print('FastAPI, six agents, Bedrock Converse and AgentCore Web Search imports OK')"
+    - bash -n scripts/aws/merge-runtime-secrets.sh
+    - bash -n scripts/aws/deploy-ecs-omnichannel.sh
+
+.deploy_environment:
+  image: docker:27.5.1
+  services:
+    - name: docker:27.5.1-dind
+      alias: docker
+  id_tokens:
+    AWS_ID_TOKEN:
+      aud: sts.amazonaws.com
+  before_script:
+    - apk add --no-cache aws-cli jq bash nodejs npm
+    - printf '%s' "$AWS_ID_TOKEN" > /tmp/aws-web-identity-token
+    - chmod 600 /tmp/aws-web-identity-token
+    - export AWS_WEB_IDENTITY_TOKEN_FILE=/tmp/aws-web-identity-token
+    - export AWS_ROLE_ARN="$CI_AWS_ROLE_ARN"
+    - export AWS_ROLE_SESSION_NAME="gitlab-${CI_PROJECT_ID}-${CI_PIPELINE_IID}"
+    - export AWS_DEFAULT_REGION="$AWS_REGION"
+    - aws sts get-caller-identity
+  script:
+    - |
+      set -eu
+      : "${CI_AWS_ROLE_ARN:?Set the environment-specific AWS OIDC role ARN}"
+      export AWS_REGION
+      export AWS_ACCOUNT_ID="$ENV_AWS_ACCOUNT_ID"
+      export ECR_REPOSITORY_NAME="$ENV_ECR_REPOSITORY_NAME"
+      export ECS_CLUSTER_NAME="$ENV_ECS_CLUSTER_NAME"
+      export ECS_API_SERVICE_NAME="$ENV_ECS_API_SERVICE_NAME"
+      export ECS_WORKER_SERVICE_NAME="$ENV_ECS_WORKER_SERVICE_NAME"
+      export ECS_BEAT_SERVICE_NAME="$ENV_ECS_BEAT_SERVICE_NAME"
+      export ECS_API_CONTAINER_NAME="${ENV_ECS_API_CONTAINER_NAME:?Set API container name}"
+      export ECS_WORKER_CONTAINER_NAME="${ENV_ECS_WORKER_CONTAINER_NAME:?Set Worker container name}"
+      export ECS_BEAT_CONTAINER_NAME="${ENV_ECS_BEAT_CONTAINER_NAME:?Set Beat container name}"
+      export APP_SECRET_ID="$ENV_APP_SECRET_ID"
+      export COMMUNICATIONS_SQS_QUEUE_URL="$ENV_COMMUNICATIONS_SQS_QUEUE_URL"
+      export REDIS_URL="$ENV_REDIS_URL"
+      export FRONTEND_BUCKET="$ENV_FRONTEND_BUCKET"
+      export CLOUDFRONT_DISTRIBUTION_ID="$ENV_CLOUDFRONT_DISTRIBUTION_ID"
+      export IMAGE_TAG="${CI_COMMIT_SHORT_SHA}-${CI_PIPELINE_IID}"
+
+      # Only non-empty, explicitly configured values are merged into the existing secret.
+      export META_WHATSAPP_ACCESS_TOKEN="${ENV_META_WHATSAPP_ACCESS_TOKEN:-}"
+      export META_WHATSAPP_PHONE_NUMBER_ID="${ENV_META_WHATSAPP_PHONE_NUMBER_ID:-}"
+      export META_WHATSAPP_APP_SECRET="${ENV_META_WHATSAPP_APP_SECRET:-}"
+      export META_WHATSAPP_VERIFY_TOKEN="${ENV_META_WHATSAPP_VERIFY_TOKEN:-}"
+      export META_GRAPH_API_VERSION="${ENV_META_GRAPH_API_VERSION:-}"
+      export EMAIL_FROM_ADDRESS="${ENV_EMAIL_FROM_ADDRESS:-}"
+      export SES_SENDER_VERIFIED="${ENV_SES_SENDER_VERIFIED:-}"
+      export MICROSOFT_TENANT_ID="${ENV_MICROSOFT_TENANT_ID:-}"
+      export MICROSOFT_CLIENT_ID="${ENV_MICROSOFT_CLIENT_ID:-}"
+      export MICROSOFT_CLIENT_SECRET="${ENV_MICROSOFT_CLIENT_SECRET:-}"
+      export MICROSOFT_GRAPH_SENDER="${ENV_MICROSOFT_GRAPH_SENDER:-}"
+
+      bash scripts/aws/deploy-ecs-omnichannel.sh
+
+deploy_dev:
+  extends: .deploy_environment
+  stage: deploy_dev
+  variables:
+    CI_AWS_ROLE_ARN: "$AWS_ROLE_ARN_DEV"
+    ENV_AWS_ACCOUNT_ID: "$AWS_ACCOUNT_ID_DEV"
+    ENV_ECR_REPOSITORY_NAME: "$ECR_REPOSITORY_NAME_DEV"
+    ENV_ECS_CLUSTER_NAME: "$ECS_CLUSTER_NAME_DEV"
+    ENV_ECS_API_SERVICE_NAME: "$ECS_API_SERVICE_NAME_DEV"
+    ENV_ECS_WORKER_SERVICE_NAME: "$ECS_WORKER_SERVICE_NAME_DEV"
+    ENV_ECS_BEAT_SERVICE_NAME: "$ECS_BEAT_SERVICE_NAME_DEV"
+    ENV_ECS_API_CONTAINER_NAME: "$ECS_API_CONTAINER_NAME_DEV"
+    ENV_ECS_WORKER_CONTAINER_NAME: "$ECS_WORKER_CONTAINER_NAME_DEV"
+    ENV_ECS_BEAT_CONTAINER_NAME: "$ECS_BEAT_CONTAINER_NAME_DEV"
+    ENV_APP_SECRET_ID: "$APP_SECRET_ID_DEV"
+    ENV_COMMUNICATIONS_SQS_QUEUE_URL: "$COMMUNICATIONS_SQS_QUEUE_URL_DEV"
+    ENV_REDIS_URL: "$REDIS_URL_DEV"
+    ENV_FRONTEND_BUCKET: "$FRONTEND_BUCKET_DEV"
+    ENV_CLOUDFRONT_DISTRIBUTION_ID: "$CLOUDFRONT_DISTRIBUTION_ID_DEV"
+    ENV_META_WHATSAPP_ACCESS_TOKEN: "$META_WHATSAPP_ACCESS_TOKEN_DEV"
+    ENV_META_WHATSAPP_PHONE_NUMBER_ID: "$META_WHATSAPP_PHONE_NUMBER_ID_DEV"
+    ENV_META_WHATSAPP_APP_SECRET: "$META_WHATSAPP_APP_SECRET_DEV"
+    ENV_META_WHATSAPP_VERIFY_TOKEN: "$META_WHATSAPP_VERIFY_TOKEN_DEV"
+    ENV_META_GRAPH_API_VERSION: "$META_GRAPH_API_VERSION_DEV"
+    ENV_EMAIL_FROM_ADDRESS: "$EMAIL_FROM_ADDRESS_DEV"
+    ENV_SES_SENDER_VERIFIED: "$SES_SENDER_VERIFIED_DEV"
+    ENV_MICROSOFT_TENANT_ID: "$MICROSOFT_TENANT_ID_DEV"
+    ENV_MICROSOFT_CLIENT_ID: "$MICROSOFT_CLIENT_ID_DEV"
+    ENV_MICROSOFT_CLIENT_SECRET: "$MICROSOFT_CLIENT_SECRET_DEV"
+    ENV_MICROSOFT_GRAPH_SENDER: "$MICROSOFT_GRAPH_SENDER_DEV"
+  environment:
+    name: development
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+
+deploy_prod:
+  extends: .deploy_environment
+  stage: deploy_prod
+  variables:
+    CI_AWS_ROLE_ARN: "$AWS_ROLE_ARN_PROD"
+    ENV_AWS_ACCOUNT_ID: "$AWS_ACCOUNT_ID_PROD"
+    ENV_ECR_REPOSITORY_NAME: "$ECR_REPOSITORY_NAME_PROD"
+    ENV_ECS_CLUSTER_NAME: "$ECS_CLUSTER_NAME_PROD"
+    ENV_ECS_API_SERVICE_NAME: "$ECS_API_SERVICE_NAME_PROD"
+    ENV_ECS_WORKER_SERVICE_NAME: "$ECS_WORKER_SERVICE_NAME_PROD"
+    ENV_ECS_BEAT_SERVICE_NAME: "$ECS_BEAT_SERVICE_NAME_PROD"
+    ENV_ECS_API_CONTAINER_NAME: "$ECS_API_CONTAINER_NAME_PROD"
+    ENV_ECS_WORKER_CONTAINER_NAME: "$ECS_WORKER_CONTAINER_NAME_PROD"
+    ENV_ECS_BEAT_CONTAINER_NAME: "$ECS_BEAT_CONTAINER_NAME_PROD"
+    ENV_APP_SECRET_ID: "$APP_SECRET_ID_PROD"
+    ENV_COMMUNICATIONS_SQS_QUEUE_URL: "$COMMUNICATIONS_SQS_QUEUE_URL_PROD"
+    ENV_REDIS_URL: "$REDIS_URL_PROD"
+    ENV_FRONTEND_BUCKET: "$FRONTEND_BUCKET_PROD"
+    ENV_CLOUDFRONT_DISTRIBUTION_ID: "$CLOUDFRONT_DISTRIBUTION_ID_PROD"
+    ENV_META_WHATSAPP_ACCESS_TOKEN: "$META_WHATSAPP_ACCESS_TOKEN_PROD"
+    ENV_META_WHATSAPP_PHONE_NUMBER_ID: "$META_WHATSAPP_PHONE_NUMBER_ID_PROD"
+    ENV_META_WHATSAPP_APP_SECRET: "$META_WHATSAPP_APP_SECRET_PROD"
+    ENV_META_WHATSAPP_VERIFY_TOKEN: "$META_WHATSAPP_VERIFY_TOKEN_PROD"
+    ENV_META_GRAPH_API_VERSION: "$META_GRAPH_API_VERSION_PROD"
+    ENV_EMAIL_FROM_ADDRESS: "$EMAIL_FROM_ADDRESS_PROD"
+    ENV_SES_SENDER_VERIFIED: "$SES_SENDER_VERIFIED_PROD"
+    ENV_MICROSOFT_TENANT_ID: "$MICROSOFT_TENANT_ID_PROD"
+    ENV_MICROSOFT_CLIENT_ID: "$MICROSOFT_CLIENT_ID_PROD"
+    ENV_MICROSOFT_CLIENT_SECRET: "$MICROSOFT_CLIENT_SECRET_PROD"
+    ENV_MICROSOFT_GRAPH_SENDER: "$MICROSOFT_GRAPH_SENDER_PROD"
+  environment:
+    name: production
+  allow_failure: false
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
