@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     meta_whatsapp_verify_token: str = ""
     meta_whatsapp_app_secret: str = ""
     meta_whatsapp_phone_number_id: str = ""
+    meta_whatsapp_access_token: str = ""
+    meta_graph_api_version: str = "v26.0"
+
+    # Outbound email via Amazon SES (no Microsoft 365 tenant admin consent required)
+    email_from_address: str = "contacto@cbloft2.pt"
+    ses_sender_verified: bool = False
 
     # Microsoft 365 integration
     microsoft_tenant_id: str = "common"
