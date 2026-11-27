@@ -91,7 +91,7 @@ Não executar migrações em paralelo em cada réplica da API, Worker ou Beat. F
 
 ## 7. Estado do processamento de mensagens
 
-**Importante:** a aprovação grava a mensagem e o registo Outbox na mesma transação PostgreSQL. O Beat agenda o relay; o Worker publica apenas o ID da mensagem numa fila SQS FIFO cifrada e consome essa fila. A fila tem DLQ e redrive após cinco receções. O consumidor revalida permissões e consentimento antes de enviar. Resultados ambíguos são marcados `delivery_uncertain` e exigem reconciliação humana; não são reenviados automaticamente.
+**Importante:** a aprovação grava a mensagem e o registo Outbox na mesma transação PostgreSQL. O Beat agenda o relay; o Worker publica apenas o ID da mensagem numa fila SQS FIFO cifrada e consome essa fila. A fila tem DLQ, redrive após cinco receções e alarme CloudWatch quando há mensagens visíveis na DLQ. Confirmar que o tópico SNS de alertas tem uma subscrição operacional. O consumidor revalida permissões e consentimento antes de enviar. Resultados ambíguos são marcados `delivery_uncertain` e exigem reconciliação humana; não são reenviados automaticamente.
 
 Antes de ativar comunicações em produção, implementar:
 - registo Outbox na mesma transação que aprova a mensagem;
