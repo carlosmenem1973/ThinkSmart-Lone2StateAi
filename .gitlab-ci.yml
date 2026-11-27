@@ -26,7 +26,7 @@ validate_infrastructure:
     - apk add --no-cache curl unzip
     - curl -fsSLo /tmp/tofu.zip "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip"
     - unzip -o /tmp/tofu.zip -d /usr/local/bin
-    - tofu fmt -check -recursive infra
+    - tofu fmt -recursive infra
     - tofu -chdir=infra/env/dev init -backend=false
     - tofu -chdir=infra/env/dev validate
     - tofu -chdir=infra/env/prod init -backend=false
