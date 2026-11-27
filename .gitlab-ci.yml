@@ -53,7 +53,8 @@ validate_backend_syntax:
     - python -m pip install --no-cache-dir -r backend/requirements.txt
     - python -m compileall -q backend/app
     - PYTHONPATH=backend python -c "from app.main import app; from app.agents.registry import AGENTS; from app.services.ai import bedrock_runtime_client, agentcore_client; assert len(AGENTS) == 6; assert 'Converse' in bedrock_runtime_client().meta.service_model.operation_names; assert 'InvokeWebSearch' in agentcore_client().meta.service_model.operation_names; print('FastAPI, six agents, Bedrock Converse and AgentCore Web Search imports OK')"
-    - bash -n scripts/aws/merge-runtime-secrets.sh scripts/aws/deploy-ecs-omnichannel.sh
+    - bash -n scripts/aws/merge-runtime-secrets.sh
+    - bash -n scripts/aws/deploy-ecs-omnichannel.sh
 
 .deploy_environment:
   image: docker:27.5.1
@@ -83,9 +84,9 @@ validate_backend_syntax:
       export ECS_API_SERVICE_NAME="$ENV_ECS_API_SERVICE_NAME"
       export ECS_WORKER_SERVICE_NAME="$ENV_ECS_WORKER_SERVICE_NAME"
       export ECS_BEAT_SERVICE_NAME="$ENV_ECS_BEAT_SERVICE_NAME"
-      export ECS_API_CONTAINER_NAME="${ENV_ECS_API_CONTAINER_NAME:-api}"
-      export ECS_WORKER_CONTAINER_NAME="${ENV_ECS_WORKER_CONTAINER_NAME:-worker}"
-      export ECS_BEAT_CONTAINER_NAME="${ENV_ECS_BEAT_CONTAINER_NAME:-beat}"
+      export ECS_API_CONTAINER_NAME="${ENV_ECS_API_CONTAINER_NAME:?Set API container name}"
+      export ECS_WORKER_CONTAINER_NAME="${ENV_ECS_WORKER_CONTAINER_NAME:?Set Worker container name}"
+      export ECS_BEAT_CONTAINER_NAME="${ENV_ECS_BEAT_CONTAINER_NAME:?Set Beat container name}"
       export APP_SECRET_ID="$ENV_APP_SECRET_ID"
       export COMMUNICATIONS_SQS_QUEUE_URL="$ENV_COMMUNICATIONS_SQS_QUEUE_URL"
       export REDIS_URL="$ENV_REDIS_URL"
