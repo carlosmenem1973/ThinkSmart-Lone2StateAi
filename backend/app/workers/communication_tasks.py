@@ -183,7 +183,7 @@ def _process_sqs_record(record: dict) -> str:
         channel = db.scalar(
             select(CommunicationChannel).where(
                 CommunicationChannel.channel == thread.channel,
-                CommunicationChannel.provider == "meta_whatsapp_cloud" if thread.channel == "whatsapp" else CommunicationChannel.provider.in_({"aws_ses", "microsoft_graph"}),
+                CommunicationChannel.provider.in_({"meta_whatsapp_cloud"} if thread.channel == "whatsapp" else {"aws_ses", "microsoft_graph"}),
                 CommunicationChannel.enabled.is_(True),
                 CommunicationChannel.outbound_enabled.is_(True),
             ).order_by(CommunicationChannel.id.desc())
