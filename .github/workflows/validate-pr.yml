@@ -83,6 +83,25 @@ jobs:
           alembic downgrade base
           alembic upgrade head
 
+  infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OpenTofu
+        run: |
+          curl -fsSLo /tmp/tofu.zip "https://github.com/opentofu/opentofu/releases/download/v1.10.6/tofu_1.10.6_linux_amd64.zip"
+          unzip -o /tmp/tofu.zip -d /tmp/tofu-bin
+          sudo install /tmp/tofu-bin/tofu /usr/local/bin/tofu
+      - name: Format and validate development infrastructure
+        run: |
+          tofu fmt -recursive infra
+          tofu -chdir=infra/env/dev init -backend=false
+          tofu -chdir=infra/env/dev validate
+      - name: Validate production infrastructure
+        run: |
+          tofu -chdir=infra/env/prod init -backend=false
+          tofu -chdir=infra/env/prod validate
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
