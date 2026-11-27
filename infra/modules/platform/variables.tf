@@ -20,6 +20,13 @@ variable "api_desired_count" { type = number
   default = 1 }
 variable "worker_desired_count" { type = number
   default = 1 }
+variable "beat_desired_count" { type = number
+  default = 1
+  validation {
+    condition = var.beat_desired_count == 0 || var.beat_desired_count == 1
+    error_message = "Celery Beat must have desired count 0 (bootstrap) or exactly 1."
+  }
+}
 variable "db_instance_class" { type = string }
 variable "db_multi_az" { type = bool
   default = false }
