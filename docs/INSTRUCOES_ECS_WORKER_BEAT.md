@@ -2,7 +2,7 @@
 
 ## 1. Arquitetura
 
-A infraestrutura OpenTofu define três serviços Fargate independentes no cluster `thinksmart-lone2stateai-prod`:
+O rollout desta funcionalidade usa AWS CLI sobre recursos ECS já existentes. Os ficheiros OpenTofu permanecem para validação/referência e não são aplicados pelo pipeline GitLab. O pipeline exige três serviços Fargate previamente criados no cluster aprovado:
 
 | Serviço | Processo | Desired count |
 |---|---|---:|
@@ -14,7 +14,7 @@ O Worker consome tarefas. O Beat publica tarefas agendadas. Nunca executar `cele
 
 ## 2. Task Definitions e imagens
 
-OpenTofu cria as famílias:
+As famílias de Task Definition têm de existir antes do deployment AWS CLI:
 - `thinksmart-lone2stateai-prod-api`
 - `thinksmart-lone2stateai-prod-worker`
 - `thinksmart-lone2stateai-prod-beat`
@@ -42,7 +42,7 @@ A infraestrutura referencia as seguintes chaves no secret JSON da aplicação:
 - `EMAIL_FROM_ADDRESS`
 - `SES_SENDER_VERIFIED`
 
-Preencher os valores reais diretamente no AWS Secrets Manager, nunca no repositório, ficheiros de task definition ou variáveis Terraform em texto simples. A infraestrutura cria valores iniciais vazios/placeholders para as chaves novas; isso não configura credenciais reais.
+Preencher os valores reais no AWS Secrets Manager através de `scripts/aws/merge-runtime-secrets.sh` ou de um procedimento aprovado, nunca no repositório ou em ficheiros de task definition. O helper preserva todas as chaves que não forem explicitamente atualizadas.
 
 Configuração de email prevista:
 - Remetente: `contacto@cbloft2.pt`
@@ -79,10 +79,10 @@ Não executar migrações em paralelo em cada réplica da API, Worker ou Beat. F
 
 1. Rever o PR e obter CI verde.
 2. Construir e publicar a imagem backend aprovada nos repositórios ECR necessários (API e worker).
-3. Aplicar OpenTofu apenas após rever o plano e confirmar os recursos que serão criados/alterados.
-4. Registar as novas Task Definitions com os serviços ainda em desired count 0.
-5. O pipeline executa `alembic upgrade head` uma única vez como tarefa ECS pontual e valida o exit code. Se a migração falhar, API, Worker e Beat permanecem parados.
-6. Só após a migração bem-sucedida, escalar a API e o Worker e iniciar o Beat com desired count exatamente 1.
+3. Confirmar por AWS CLI que cluster, serviços, SQS FIFO cifrada, Redis, ECR, secret, bucket e CloudFront já existem. O pipeline não provisiona recursos.
+4. O job GitLab manual regista revisões das Task Definitions existentes, preservando roles, rede, logging, volumes e comandos.
+5. O pipeline executa `alembic upgrade head` uma única vez como tarefa ECS pontual e valida o exit code. Se a migração falhar, não atualiza os serviços.
+6. Só após a migração bem-sucedida, atualizar API, Worker e Beat existentes; o Beat tem de manter desired count exatamente 1.
 7. Confirmar logs de arranque, registo de tarefas e publicação dos agendamentos.
 8. Configurar e testar SES e Meta com envio desativado globalmente.
 9. Só depois de validação legal, operacional e humana, ativar os canais de saída.
@@ -91,12 +91,7 @@ Não executar migrações em paralelo em cada réplica da API, Worker ou Beat. F
 
 **Importante:** a aprovação grava a mensagem e o registo Outbox na mesma transação PostgreSQL. O Beat agenda o relay; o Worker publica apenas o ID da mensagem numa fila SQS FIFO cifrada e consome essa fila. A fila tem DLQ, redrive após cinco receções e alarme CloudWatch quando há mensagens visíveis na DLQ. Confirmar que o tópico SNS de alertas tem uma subscrição operacional. O consumidor revalida permissões e consentimento antes de enviar. Resultados ambíguos são marcados `delivery_uncertain` e exigem reconciliação humana; não são reenviados automaticamente.
 
-Antes de ativar comunicações em produção, implementar:
-- registo Outbox na mesma transação que aprova a mensagem;
-- relay/consumer durável com identificador idempotente;
-- SQS com DLQ, visibilidade e redrive policy;
-- reconciliação para resultados ambíguos do fornecedor, sem reenviar cegamente mensagens em estado `sending`;
-- callbacks de entrega/leitura Meta e eventos SES, persistidos com deduplicação.
+Antes de ativar comunicações em produção, validar em staging o relay/consumer, SQS FIFO/DLQ, visibilidade, redrive, duplicação e recuperação de falhas. A persistência de callbacks de entrega/leitura Meta e eventos SES ainda está por implementar.
 
 O estado `sent` atual significa aceitação pelo fornecedor, não confirmação de entrega ao destinatário.
 
