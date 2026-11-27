@@ -100,7 +100,7 @@ def _delete_sqs_message(receipt_handle: str) -> None:
 
 
 def _consent_is_valid(db, contact, channel_name: str, purpose: str, now: datetime) -> bool:
-    if contact.do_not_contact or not contact.contact_permission:
+    if not contact.active or contact.do_not_contact or not contact.contact_permission:
         return False
     consent = db.scalar(
         select(ContactChannelConsent).where(
