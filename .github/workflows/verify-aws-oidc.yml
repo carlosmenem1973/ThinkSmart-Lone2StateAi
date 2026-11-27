@@ -1,0 +1,53 @@
+name: Verify AWS OIDC access
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-aws:
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Configure AWS credentials using GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
+          role-session-name: github-oidc-smoke-${{ github.run_id }}
+
+      - name: Verify AWS identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
+          ARN="$(aws sts get-caller-identity --query Arn --output text)"
+          test "$ACCOUNT" = "049451987829"
+          case "$ARN" in
+            arn:aws:sts::049451987829:assumed-role/thinksmart-github-actions-prod-role/*) ;;
+            *) echo "Unexpected assumed role: $ARN" >&2; exit 1 ;;
+          esac
+          echo "Authenticated successfully to AWS account $ACCOUNT"
+          echo "Assumed role: $ARN"
+
+      - name: Verify read-only access to production resources
+        shell: bash
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-1' }}
+          ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
+          ECS_API_SERVICE_NAME: ${{ vars.ECS_API_SERVICE_NAME }}
+          ECR_REPOSITORY_NAME: ${{ vars.ECR_REPOSITORY_NAME }}
+        run: |
+          set -euo pipefail
+          aws ecs describe-clusters --clusters "$ECS_CLUSTER_NAME" --region "$AWS_REGION" \
+            --query 'clusters[0].{Name:clusterName,Status:status,RunningTasks:runningTasksCount}' --output table
+          aws ecs describe-services --cluster "$ECS_CLUSTER_NAME" --services "$ECS_API_SERVICE_NAME" \
+            --region "$AWS_REGION" \
+            --query 'services[0].{Name:serviceName,Status:status,Desired:desiredCount,Running:runningCount,TaskDefinition:taskDefinition}' --output table
+          aws ecr describe-repositories --repository-names "$ECR_REPOSITORY_NAME" \
+            --region "$AWS_REGION" --query 'repositories[0].repositoryName' --output text
