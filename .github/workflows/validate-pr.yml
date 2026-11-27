@@ -107,6 +107,16 @@ jobs:
           assert "scripts/aws/deploy-ecs-api.sh" in str(deploy["steps"])
           assert "DEPLOY-PRODUCTION" in str(workflow)
           assert "tofu apply" not in str(deploy["steps"])
+
+          # Keep the existing GitLab pipeline available during the transition.
+          with open(".gitlab-ci.yml", encoding="utf-8") as stream:
+              gitlab = yaml.safe_load(stream)
+          assert "validate_infrastructure" in gitlab
+          assert "validate_frontend" in gitlab
+          assert "validate_backend_syntax" in gitlab
+          assert "deploy_dev" in gitlab
+          assert "deploy_prod" in gitlab
+          assert ".deploy_environment" in gitlab
           PY
           bash -n scripts/aws/deploy-ecs-api.sh
           bash -n scripts/aws/deploy-ecs-omnichannel.sh
