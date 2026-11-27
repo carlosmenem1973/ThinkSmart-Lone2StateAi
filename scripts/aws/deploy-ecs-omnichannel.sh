@@ -85,6 +85,7 @@ bash scripts/aws/merge-runtime-secrets.sh
 runtime_keys=(
   META_WHATSAPP_ACCESS_TOKEN META_WHATSAPP_PHONE_NUMBER_ID META_WHATSAPP_APP_SECRET
   META_WHATSAPP_VERIFY_TOKEN META_GRAPH_API_VERSION EMAIL_FROM_ADDRESS SES_SENDER_VERIFIED
+  DATABASE_URL SECRET_KEY
   MICROSOFT_TENANT_ID MICROSOFT_CLIENT_ID MICROSOFT_CLIENT_SECRET MICROSOFT_GRAPH_SENDER
   COMMUNICATIONS_SQS_QUEUE_URL REDIS_URL
 )
@@ -162,7 +163,7 @@ aws ecs update-service --cluster "$ECS_CLUSTER_NAME" --service "$ECS_BEAT_SERVIC
 aws ecs wait services-stable --cluster "$ECS_CLUSTER_NAME" \
   --services "$ECS_API_SERVICE_NAME" "$ECS_WORKER_SERVICE_NAME" "$ECS_BEAT_SERVICE_NAME"
 
-aws s3 sync frontend/dist "s3://${FRONTEND_BUCKET}/" --delete
+aws s3 sync frontend/dist "s3://${FRONTEND_BUCKET}/"
 aws cloudfront create-invalidation --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
   --paths '/*' >/dev/null
 
