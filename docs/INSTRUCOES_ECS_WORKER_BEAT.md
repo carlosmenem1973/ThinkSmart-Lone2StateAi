@@ -80,14 +80,12 @@ Não executar migrações em paralelo em cada réplica da API, Worker ou Beat. F
 1. Rever o PR e obter CI verde.
 2. Construir e publicar a imagem backend aprovada nos repositórios ECR necessários (API e worker).
 3. Aplicar OpenTofu apenas após rever o plano e confirmar os recursos que serão criados/alterados.
-4. Registar/deployar a API.
-5. Executar `alembic upgrade head` uma única vez como tarefa pontual.
-6. Confirmar `alembic current`.
-7. Iniciar Worker com desired count inicial 1.
-8. Iniciar Beat com desired count exatamente 1.
-9. Confirmar logs de arranque, registo de tarefas e publicação dos agendamentos.
-10. Configurar e testar SES e Meta com envio desativado globalmente.
-11. Só depois de validação legal, operacional e humana, ativar os canais de saída.
+4. Registar as novas Task Definitions com os serviços ainda em desired count 0.
+5. O pipeline executa `alembic upgrade head` uma única vez como tarefa ECS pontual e valida o exit code. Se a migração falhar, API, Worker e Beat permanecem parados.
+6. Só após a migração bem-sucedida, escalar a API e o Worker e iniciar o Beat com desired count exatamente 1.
+7. Confirmar logs de arranque, registo de tarefas e publicação dos agendamentos.
+8. Configurar e testar SES e Meta com envio desativado globalmente.
+9. Só depois de validação legal, operacional e humana, ativar os canais de saída.
 
 ## 7. Estado do processamento de mensagens
 
