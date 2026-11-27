@@ -103,6 +103,7 @@ validate_backend_syntax:
         -var="api_image_tag=bootstrap" \
         -var="api_desired_count=0" \
         -var="worker_desired_count=0" \
+        -var="beat_desired_count=0" \
         -var="gitlab_oidc_provider_arn=${GITLAB_OIDC_PROVIDER_ARN}" \
         -var="gitlab_subject=${GITLAB_OIDC_SUBJECT}"
 
@@ -125,6 +126,13 @@ validate_backend_syntax:
       CLOUDFRONT_DOMAIN_FOR_OAUTH="$(tofu -chdir="$TF_DIR" output -raw cloudfront_domain)"
       export MICROSOFT_REDIRECT_URI="https://${CLOUDFRONT_DOMAIN_FOR_OAUTH}/api/v1/integrations/microsoft/callback"
       export GOOGLE_MAPS_API_KEY="$ENV_GOOGLE_MAPS_API_KEY"
+      export META_WHATSAPP_ACCESS_TOKEN="${ENV_META_WHATSAPP_ACCESS_TOKEN:-}"
+      export META_WHATSAPP_PHONE_NUMBER_ID="${ENV_META_WHATSAPP_PHONE_NUMBER_ID:-}"
+      export META_WHATSAPP_APP_SECRET="${ENV_META_WHATSAPP_APP_SECRET:-}"
+      export META_WHATSAPP_VERIFY_TOKEN="${ENV_META_WHATSAPP_VERIFY_TOKEN:-}"
+      export META_GRAPH_API_VERSION="${ENV_META_GRAPH_API_VERSION:-v26.0}"
+      export EMAIL_FROM_ADDRESS="${ENV_EMAIL_FROM_ADDRESS:-contacto@cbloft2.pt}"
+      export SES_SENDER_VERIFIED="${ENV_SES_SENDER_VERIFIED:-false}"
       ./scripts/aws/set-runtime-secrets.sh
 
       # Start the API and worker only after images and runtime secrets are ready.
@@ -132,6 +140,7 @@ validate_backend_syntax:
         -var="api_image_tag=${IMAGE_TAG}" \
         -var="api_desired_count=${API_DESIRED_COUNT}" \
         -var="worker_desired_count=${WORKER_DESIRED_COUNT}" \
+        -var="beat_desired_count=1" \
         -var="gitlab_oidc_provider_arn=${GITLAB_OIDC_PROVIDER_ARN}" \
         -var="gitlab_subject=${GITLAB_OIDC_SUBJECT}"
 
@@ -140,12 +149,13 @@ validate_backend_syntax:
       ECS_CLUSTER="$(tofu -chdir="$TF_DIR" output -raw ecs_cluster_name)"
       API_SERVICE="$(tofu -chdir="$TF_DIR" output -raw api_service_name)"
       WORKER_SERVICE="$(tofu -chdir="$TF_DIR" output -raw worker_service_name)"
+      BEAT_SERVICE="$(tofu -chdir="$TF_DIR" output -raw beat_service_name)"
 
       (cd frontend && npm install --no-audit --no-fund && npm run build)
       aws s3 sync frontend/dist "s3://${FRONTEND_BUCKET}/" --delete
       DISTRIBUTION_ID="$(tofu -chdir="$TF_DIR" output -raw cloudfront_distribution_id)"
       aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths '/*' >/dev/null
-      aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$API_SERVICE" "$WORKER_SERVICE"
+      aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$API_SERVICE" "$WORKER_SERVICE" "$BEAT_SERVICE"
       printf 'Deployment complete: https://%s\n' "$CLOUDFRONT_DOMAIN"
 
 deploy_dev:
@@ -161,6 +171,13 @@ deploy_dev:
     ENV_MICROSOFT_CLIENT_ID: "$MICROSOFT_CLIENT_ID_DEV"
     ENV_MICROSOFT_CLIENT_SECRET: "$MICROSOFT_CLIENT_SECRET_DEV"
     ENV_GOOGLE_MAPS_API_KEY: "$GOOGLE_MAPS_API_KEY_DEV"
+    ENV_META_WHATSAPP_ACCESS_TOKEN: "$META_WHATSAPP_ACCESS_TOKEN_DEV"
+    ENV_META_WHATSAPP_PHONE_NUMBER_ID: "$META_WHATSAPP_PHONE_NUMBER_ID_DEV"
+    ENV_META_WHATSAPP_APP_SECRET: "$META_WHATSAPP_APP_SECRET_DEV"
+    ENV_META_WHATSAPP_VERIFY_TOKEN: "$META_WHATSAPP_VERIFY_TOKEN_DEV"
+    ENV_META_GRAPH_API_VERSION: "$META_GRAPH_API_VERSION_DEV"
+    ENV_EMAIL_FROM_ADDRESS: "$EMAIL_FROM_ADDRESS_DEV"
+    ENV_SES_SENDER_VERIFIED: "$SES_SENDER_VERIFIED_DEV"
     ENV_ALB_CERTIFICATE_ARN: "$ALB_CERTIFICATE_ARN_DEV"
     ENV_API_ORIGIN_DOMAIN_NAME: "$API_ORIGIN_DOMAIN_NAME_DEV"
     ENV_ROUTE53_ZONE_ID: "$ROUTE53_ZONE_ID_DEV"
@@ -184,6 +201,13 @@ deploy_prod:
     ENV_MICROSOFT_CLIENT_ID: "$MICROSOFT_CLIENT_ID_PROD"
     ENV_MICROSOFT_CLIENT_SECRET: "$MICROSOFT_CLIENT_SECRET_PROD"
     ENV_GOOGLE_MAPS_API_KEY: "$GOOGLE_MAPS_API_KEY_PROD"
+    ENV_META_WHATSAPP_ACCESS_TOKEN: "$META_WHATSAPP_ACCESS_TOKEN_PROD"
+    ENV_META_WHATSAPP_PHONE_NUMBER_ID: "$META_WHATSAPP_PHONE_NUMBER_ID_PROD"
+    ENV_META_WHATSAPP_APP_SECRET: "$META_WHATSAPP_APP_SECRET_PROD"
+    ENV_META_WHATSAPP_VERIFY_TOKEN: "$META_WHATSAPP_VERIFY_TOKEN_PROD"
+    ENV_META_GRAPH_API_VERSION: "$META_GRAPH_API_VERSION_PROD"
+    ENV_EMAIL_FROM_ADDRESS: "$EMAIL_FROM_ADDRESS_PROD"
+    ENV_SES_SENDER_VERIFIED: "$SES_SENDER_VERIFIED_PROD"
     ENV_ALB_CERTIFICATE_ARN: "$ALB_CERTIFICATE_ARN_PROD"
     ENV_API_ORIGIN_DOMAIN_NAME: "$API_ORIGIN_DOMAIN_NAME_PROD"
     ENV_ROUTE53_ZONE_ID: "$ROUTE53_ZONE_ID_PROD"
