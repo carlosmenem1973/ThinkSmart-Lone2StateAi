@@ -18,3 +18,5 @@ output "alerts_topic_arn" { value = module.platform.alerts_topic_arn }
 
 output "communications_queue_url" { value = module.platform.communications_queue_url }
 output "communications_dlq_url" { value = module.platform.communications_dlq_url }
+
+output "ecs_security_group_id" { value = module.platform.ecs_security_group_id }
