@@ -38,8 +38,8 @@ printf '%s' "$SERVICES_JSON" | jq -e --arg api "$ECS_API_SERVICE_NAME" \
   --arg worker "$ECS_WORKER_SERVICE_NAME" --arg beat "$ECS_BEAT_SERVICE_NAME" '
   (.failures | length) == 0 and
   (.services | length) == 3 and
+  ([.services[].serviceName] | sort) == ([$api, $worker, $beat] | sort) and
   all(.services[]; .status == "ACTIVE" and (.taskDefinition | type == "string")) and
-  ([.services[] | select(.serviceName == $api) | .desiredCount] == [1] | not) and
   ([.services[] | select(.serviceName == $api) | .desiredCount] | all(.[]; . >= 1)) and
   ([.services[] | select(.serviceName == $worker) | .desiredCount] | all(.[]; . >= 1)) and
   ([.services[] | select(.serviceName == $beat) | .desiredCount] == [1])
