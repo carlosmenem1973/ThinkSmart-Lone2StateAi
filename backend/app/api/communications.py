@@ -155,8 +155,8 @@ def configure_channel_outbound(
                 raise HTTPException(status_code=409, detail="Channel sender_identifier must match EMAIL_FROM_ADDRESS")
         else:
             raise HTTPException(status_code=422, detail="Outbound provider is not supported")
-    row.enabled = payload.enabled
     row.outbound_enabled = payload.enabled
+    row.enabled = bool(payload.enabled or row.inbound_enabled)
     db.add(AuditLog(actor_id=admin.id, action="communications.channel_outbound_configured",
         entity_type="communication_channel", entity_id=str(row.id),
         details={"channel": row.channel, "provider": row.provider, "enabled": payload.enabled}))
@@ -349,7 +349,10 @@ def approve_message_draft(message_id: int, admin: User = Depends(require_admin_u
             CommunicationMessage.thread_id == thread.id,
             CommunicationMessage.direction == "inbound",
         ).order_by(desc(CommunicationMessage.created_at)).limit(1))
-        if not last_inbound or (now - last_inbound.created_at).total_seconds() >= 24 * 60 * 60:
+        inbound_at = last_inbound.created_at if last_inbound else None
+        if inbound_at and inbound_at.tzinfo is None:
+            inbound_at = inbound_at.replace(tzinfo=timezone.utc)
+        if not inbound_at or (now - inbound_at).total_seconds() >= 24 * 60 * 60:
             raise HTTPException(status_code=409, detail="WhatsApp customer-service window is closed; approved message templates are not yet implemented")
     elif thread.channel == "email":
         if channel.provider != "aws_ses":
