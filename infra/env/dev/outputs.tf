@@ -13,3 +13,5 @@ output "gitlab_ci_role_arn" { value = try(module.platform.gitlab_ci_role_arn, ""
 output "db_master_secret_arn" { value = module.platform.db_master_secret_arn }
 output "cloudfront_distribution_id" { value = module.platform.cloudfront_distribution_id }
 output "alerts_topic_arn" { value = module.platform.alerts_topic_arn }
+
+output "ecs_security_group_id" { value = module.platform.ecs_security_group_id }
