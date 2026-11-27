@@ -62,3 +62,11 @@ def test_ses_email_refuses_unverified_sender(monkeypatch):
         assert exc.code == "ses_sender_identity_not_verified"
     else:
         raise AssertionError("Unverified SES sender must be rejected")
+
+
+def test_delivery_error_exposes_ambiguous_outcome_for_manual_reconciliation():
+    ambiguous = delivery.DeliveryError("provider_timeout", ambiguous=True)
+    definitive = delivery.DeliveryError("invalid_recipient")
+
+    assert ambiguous.ambiguous is True
+    assert definitive.ambiguous is False
