@@ -9,7 +9,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 import boto3
-from sqlalchemy import select, and_
+from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.database import SessionLocal
@@ -60,10 +60,18 @@ def publish_pending_outbox():
                 db.rollback()
                 break
             message_id = row.message_id
+            message = db.get(CommunicationMessage, message_id)
+            if message is None:
+                row.status = "failed"
+                row.last_error = "message_not_found"
+                db.commit()
+                continue
             try:
                 _sqs_client().send_message(
                     QueueUrl=queue_url,
                     MessageBody=json.dumps({"message_id": message_id}),
+                    MessageGroupId=str(message.thread_id),
+                    MessageDeduplicationId=f"communication-{message_id}",
                 )
             except Exception as exc:
                 row.attempts += 1
