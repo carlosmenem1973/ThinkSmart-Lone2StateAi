@@ -116,7 +116,6 @@ def configure_whatsapp_inbound(
     if payload.enabled and (not settings.meta_whatsapp_app_secret or not settings.meta_whatsapp_verify_token):
         raise HTTPException(status_code=503, detail="Configure META_WHATSAPP_APP_SECRET and META_WHATSAPP_VERIFY_TOKEN in AWS Secrets Manager first")
     row.configuration_json = {**(row.configuration_json or {}), "phone_number_id": payload.phone_number_id}
-    row.enabled = payload.enabled
     row.inbound_enabled = payload.enabled
     row.enabled = bool(payload.enabled or row.outbound_enabled)
     db.add(AuditLog(actor_id=admin.id, action="communications.whatsapp_inbound_configured",
