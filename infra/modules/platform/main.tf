@@ -512,7 +512,7 @@ resource "aws_ecs_service" "beat" {
   name = "beat"
   cluster = aws_ecs_cluster.this.id
   task_definition = aws_ecs_task_definition.beat.arn
-  desired_count = 1
+  desired_count = var.beat_desired_count
   launch_type = "FARGATE"
   platform_version = "LATEST"
   deployment_minimum_healthy_percent = 0
