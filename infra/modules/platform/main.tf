@@ -17,7 +17,8 @@ resource "aws_vpc" "this" {
 }
 resource "aws_internet_gateway" "this" {
   vpc_id = aws_vpc.this.id
-  tags = local.common_tags }
+  tags = local.common_tags
+}
 resource "aws_subnet" "public" {
   count = var.az_count
   vpc_id = aws_vpc.this.id
@@ -38,7 +39,8 @@ resource "aws_eip" "nat" {
   count = var.single_nat_gateway ? 1 : var.az_count
   domain = "vpc"
   depends_on = [aws_internet_gateway.this]
-  tags = local.common_tags }
+  tags = local.common_tags
+}
 resource "aws_nat_gateway" "this" {
   count = var.single_nat_gateway ? 1 : var.az_count
   allocation_id = aws_eip.nat[count.index].id
@@ -48,19 +50,23 @@ resource "aws_nat_gateway" "this" {
 }
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.this.id
-  tags = merge(local.common_tags, { Name = "${local.prefix}-public-rt" }) }
+  tags = merge(local.common_tags, { Name = "${local.prefix}-public-rt" })
+}
 resource "aws_route" "public_internet" {
   route_table_id = aws_route_table.public.id
   destination_cidr_block = "0.0.0.0/0"
-  gateway_id = aws_internet_gateway.this.id }
+  gateway_id = aws_internet_gateway.this.id
+}
 resource "aws_route_table_association" "public" {
   count = var.az_count
   subnet_id = aws_subnet.public[count.index].id
-  route_table_id = aws_route_table.public.id }
+  route_table_id = aws_route_table.public.id
+}
 resource "aws_route_table" "private" {
   count = var.az_count
   vpc_id = aws_vpc.this.id
-  tags = merge(local.common_tags, { Name = "${local.prefix}-private-rt-${count.index + 1}" }) }
+  tags = merge(local.common_tags, { Name = "${local.prefix}-private-rt-${count.index + 1}" })
+}
 resource "aws_route" "private_nat" {
   count = var.az_count
   route_table_id = aws_route_table.private[count.index].id
@@ -70,7 +76,8 @@ resource "aws_route" "private_nat" {
 resource "aws_route_table_association" "private" {
   count = var.az_count
   subnet_id = aws_subnet.private[count.index].id
-  route_table_id = aws_route_table.private[count.index].id }
+  route_table_id = aws_route_table.private[count.index].id
+}
 
 resource "aws_security_group" "alb" {
   name = "${local.prefix}-alb-sg"
@@ -116,12 +123,14 @@ resource "aws_security_group" "ecs" {
     from_port = 8000
   to_port = 8000
   protocol = "tcp"
-  security_groups = [aws_security_group.alb.id, aws_security_group.alb_tls.id] }
+  security_groups = [aws_security_group.alb.id, aws_security_group.alb_tls.id]
+  }
   egress {
     from_port = 0
   to_port = 0
   protocol = "-1"
-  cidr_blocks = ["0.0.0.0/0"] }
+  cidr_blocks = ["0.0.0.0/0"]
+  }
   tags = local.common_tags
 }
 resource "aws_security_group" "db" {
@@ -132,7 +141,8 @@ resource "aws_security_group" "db" {
     from_port = 5432
   to_port = 5432
   protocol = "tcp"
-  security_groups = [aws_security_group.ecs.id] }
+  security_groups = [aws_security_group.ecs.id]
+  }
   tags = local.common_tags
 }
 resource "aws_security_group" "redis" {
@@ -143,7 +153,8 @@ resource "aws_security_group" "redis" {
     from_port = 6379
   to_port = 6379
   protocol = "tcp"
-  security_groups = [aws_security_group.ecs.id] }
+  security_groups = [aws_security_group.ecs.id]
+  }
   tags = local.common_tags
 }
 
@@ -189,25 +200,30 @@ resource "aws_ecr_repository" "api" {
   image_tag_mutability = "IMMUTABLE"
   image_scanning_configuration { scan_on_push = true }
   encryption_configuration { encryption_type = "AES256" }
-  tags = local.common_tags }
+  tags = local.common_tags
+}
 resource "aws_ecr_repository" "worker" {
   name = "${local.prefix}/worker"
   image_tag_mutability = "IMMUTABLE"
   image_scanning_configuration { scan_on_push = true }
   encryption_configuration { encryption_type = "AES256" }
-  tags = local.common_tags }
+  tags = local.common_tags
+}
 resource "aws_cloudwatch_log_group" "api" {
   name = "/ecs/${local.prefix}/api"
   retention_in_days = var.environment == "prod" ? 90 : 14
-  tags = local.common_tags }
+  tags = local.common_tags
+}
 resource "aws_cloudwatch_log_group" "worker" {
   name = "/ecs/${local.prefix}/worker"
   retention_in_days = var.environment == "prod" ? 90 : 14
-  tags = local.common_tags }
+  tags = local.common_tags
+}
 resource "aws_cloudwatch_log_group" "beat" {
   name = "/ecs/${local.prefix}/beat"
   retention_in_days = var.environment == "prod" ? 90 : 14
-  tags = local.common_tags }
+  tags = local.common_tags
+}
 resource "aws_sqs_queue" "communications_dlq" {
   name = "${local.prefix}-communications-dlq.fifo"
   fifo_queue = true
@@ -235,7 +251,8 @@ resource "aws_ecs_cluster" "this" {
   setting {
     name = "containerInsights"
   value = "enabled" }
-  tags = local.common_tags }
+  tags = local.common_tags
+}
 resource "aws_iam_role" "execution" {
   name = "${local.prefix}-ecs-execution"
   assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "ecs-tasks.amazonaws.com" }, Action = "sts:AssumeRole" }] })
@@ -243,7 +260,8 @@ resource "aws_iam_role" "execution" {
 }
 resource "aws_iam_role_policy_attachment" "execution" {
   role = aws_iam_role.execution.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy" }
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
 resource "aws_iam_role" "task" {
   name = "${local.prefix}-ecs-task"
   assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "ecs-tasks.amazonaws.com" }, Action = "sts:AssumeRole" }] })
@@ -336,13 +354,15 @@ resource "aws_iam_policy" "task_secrets" {
 }
 resource "aws_iam_role_policy_attachment" "task_secrets" {
   role = aws_iam_role.execution.name
-  policy_arn = aws_iam_policy.task_secrets.arn }
+  policy_arn = aws_iam_policy.task_secrets.arn
+}
 
 resource "aws_secretsmanager_secret" "app" {
   name = "${local.prefix}/application"
   description = "Populate JSON keys after infrastructure deployment"
   recovery_window_in_days = var.environment == "prod" ? 30 : 7
-  tags = local.common_tags }
+  tags = local.common_tags
+}
 resource "aws_secretsmanager_secret_version" "app_initial" {
   secret_id = aws_secretsmanager_secret.app.id
   secret_string = jsonencode({
@@ -368,7 +388,8 @@ resource "aws_secretsmanager_secret_version" "app_initial" {
 resource "aws_db_subnet_group" "this" {
   name = local.prefix
   subnet_ids = aws_subnet.private[*].id
-  tags = local.common_tags }
+  tags = local.common_tags
+}
 resource "aws_db_instance" "this" {
   identifier = local.prefix
   engine = "postgres"
@@ -395,7 +416,8 @@ resource "aws_db_instance" "this" {
 }
 resource "aws_elasticache_subnet_group" "this" {
   name = local.prefix
-  subnet_ids = aws_subnet.private[*].id }
+  subnet_ids = aws_subnet.private[*].id
+}
 resource "aws_elasticache_replication_group" "this" {
   replication_group_id = local.prefix
   description = "EstateAI ${var.environment} Redis"
@@ -422,7 +444,8 @@ resource "aws_lb" "this" {
   subnets = aws_subnet.public[*].id
   security_groups = [aws_security_group.alb.id, aws_security_group.alb_tls.id]
   enable_deletion_protection = var.environment == "prod"
-  tags = local.common_tags }
+  tags = local.common_tags
+}
 resource "aws_lb_target_group" "api" {
   name = substr("${local.prefix}-api", 0, 32)
   port = 8000
@@ -434,8 +457,10 @@ resource "aws_lb_target_group" "api" {
   matcher = "200"
   interval = 30
   healthy_threshold = 2
-  unhealthy_threshold = 3 }
-  tags = local.common_tags }
+  unhealthy_threshold = 3
+  }
+  tags = local.common_tags
+}
 resource "aws_lb_listener" "http_forward" {
   count = var.certificate_arn == "" ? 1 : 0
   load_balancer_arn = aws_lb.this.arn
@@ -443,7 +468,8 @@ resource "aws_lb_listener" "http_forward" {
   protocol = "HTTP"
   default_action {
     type = "forward"
-    target_group_arn = aws_lb_target_group.api.arn }
+    target_group_arn = aws_lb_target_group.api.arn
+    }
 }
 resource "aws_lb_listener" "http_redirect" {
   count = var.certificate_arn == "" ? 0 : 1
@@ -455,7 +481,8 @@ resource "aws_lb_listener" "http_redirect" {
     redirect {
       port = "443"
     protocol = "HTTPS"
-    status_code = "HTTP_301" }
+    status_code = "HTTP_301"
+    }
   }
 }
 resource "aws_lb_listener" "https" {
@@ -467,7 +494,8 @@ resource "aws_lb_listener" "https" {
   ssl_policy = "ELBSecurityPolicy-TLS13-1-2-2021-06"
   default_action {
     type = "forward"
-    target_group_arn = aws_lb_target_group.api.arn }
+    target_group_arn = aws_lb_target_group.api.arn
+    }
 }
 resource "aws_route53_record" "api_origin" {
   count = var.route53_zone_id != "" && var.api_origin_domain_name != "" ? 1 : 0
@@ -557,11 +585,13 @@ resource "aws_ecs_service" "api" {
   network_configuration {
     subnets = aws_subnet.private[*].id
   security_groups = [aws_security_group.ecs.id]
-  assign_public_ip = false }
+  assign_public_ip = false
+  }
   load_balancer {
     target_group_arn = aws_lb_target_group.api.arn
   container_name = "api"
-  container_port = 8000 }
+  container_port = 8000
+  }
   depends_on = [aws_lb_listener.http_forward, aws_lb_listener.http_redirect, aws_lb_listener.https, aws_secretsmanager_secret_version.app_initial]
   
   tags = local.common_tags
@@ -576,7 +606,8 @@ resource "aws_ecs_service" "worker" {
   network_configuration {
     subnets = aws_subnet.private[*].id
   security_groups = [aws_security_group.ecs.id]
-  assign_public_ip = false }
+  assign_public_ip = false
+  }
   tags = local.common_tags
 }
 resource "aws_ecs_service" "beat" {
@@ -645,13 +676,15 @@ resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
 resource "aws_s3_bucket" "frontend" {
   bucket = "${local.prefix}-${data.aws_caller_identity.current.account_id}-frontend"
   force_destroy = var.environment != "prod"
-  tags = local.common_tags }
+  tags = local.common_tags
+}
 resource "aws_s3_bucket_public_access_block" "frontend" {
   bucket = aws_s3_bucket.frontend.id
   block_public_acls = true
   block_public_policy = true
   ignore_public_acls = true
-  restrict_public_buckets = true }
+  restrict_public_buckets = true
+}
 resource "aws_s3_bucket_server_side_encryption_configuration" "frontend" {
   bucket = aws_s3_bucket.frontend.id
   rule {
@@ -665,7 +698,8 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
   description = "Private S3 origin"
   origin_access_control_origin_type = "s3"
   signing_behavior = "always"
-  signing_protocol = "sigv4" }
+  signing_protocol = "sigv4"
+}
 resource "aws_wafv2_web_acl" "cloudfront" {
   provider = aws.use1
   name = "${local.prefix}-cloudfront-waf"
@@ -689,7 +723,8 @@ resource "aws_wafv2_web_acl" "cloudfront" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name = "${local.prefix}-rate-limit"
-      sampled_requests_enabled = true }
+      sampled_requests_enabled = true
+    }
   }
   rule {
     name = "AWSManagedCommonRuleSet"
@@ -706,7 +741,8 @@ resource "aws_wafv2_web_acl" "cloudfront" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name = "${local.prefix}-common"
-      sampled_requests_enabled = true }
+      sampled_requests_enabled = true
+    }
   }
   rule {
     name = "AWSManagedKnownBadInputs"
@@ -723,7 +759,8 @@ resource "aws_wafv2_web_acl" "cloudfront" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name = "${local.prefix}-bad-inputs"
-      sampled_requests_enabled = true }
+      sampled_requests_enabled = true
+    }
   }
   rule {
     name = "AWSManagedIpReputation"
@@ -740,12 +777,14 @@ resource "aws_wafv2_web_acl" "cloudfront" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name = "${local.prefix}-ip-reputation"
-      sampled_requests_enabled = true }
+      sampled_requests_enabled = true
+    }
   }
   visibility_config {
     cloudwatch_metrics_enabled = true
       metric_name = "${local.prefix}-waf"
-      sampled_requests_enabled = true }
+      sampled_requests_enabled = true
+    }
   tags = local.common_tags
 }
 
