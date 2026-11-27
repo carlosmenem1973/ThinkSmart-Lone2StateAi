@@ -70,8 +70,8 @@ def communications_overview(user: User = Depends(get_business_user), db: Session
             "enabled": c.enabled, "inbound_enabled": c.inbound_enabled,
             "outbound_enabled": c.outbound_enabled,
             "ready": bool(c.enabled and (c.inbound_enabled or c.outbound_enabled))} for c in channels],
-        "message_counts": counts, "sending_enabled": False,
-        "note": "Provider delivery remains disabled until credentials, sender verification and webhook validation are configured.",
+        "message_counts": counts, "sending_enabled": any(ch.enabled and ch.outbound_enabled for ch in channels),
+        "note": "Outbound delivery is available only on administrator-enabled channels with configured provider credentials and consent checks.",
     }
 
 @router.post("/channels", status_code=201)
@@ -118,8 +118,7 @@ def configure_whatsapp_inbound(
     row.configuration_json = {**(row.configuration_json or {}), "phone_number_id": payload.phone_number_id}
     row.enabled = payload.enabled
     row.inbound_enabled = payload.enabled
-    # Outbound stays disabled until a separate send adapter and approval workflow are deployed.
-    row.outbound_enabled = False
+    row.enabled = bool(payload.enabled or row.outbound_enabled)
     db.add(AuditLog(actor_id=admin.id, action="communications.whatsapp_inbound_configured",
         entity_type="communication_channel", entity_id=str(row.id),
         details={"enabled": payload.enabled, "phone_number_id": payload.phone_number_id}))
@@ -216,6 +215,8 @@ def create_message_draft(payload: DraftInput, user: User = Depends(get_business_
     _can_access_contact(user, contact)
     if contact.do_not_contact:
         raise HTTPException(status_code=409, detail="Contact is globally suppressed (do_not_contact)")
+    if not contact.contact_permission:
+        raise HTTPException(status_code=403, detail="Contact permission is not enabled in the CRM")
     destination = contact.phone if payload.channel in {"whatsapp", "sms"} else contact.email
     if not destination:
         raise HTTPException(status_code=422, detail=f"Contact has no destination for {payload.channel}")
@@ -322,6 +323,8 @@ def approve_message_draft(message_id: int, admin: User = Depends(require_admin_u
         raise HTTPException(status_code=409, detail="A linked CRM contact is required before sending")
     if contact.do_not_contact:
         raise HTTPException(status_code=409, detail="Contact is globally suppressed (do_not_contact)")
+    if not contact.contact_permission:
+        raise HTTPException(status_code=403, detail="Contact permission is not enabled in the CRM")
     purpose = str((message.metadata_json or {}).get("purpose") or "service")
     consent = _consent_for(db, contact.id, thread.channel, purpose)
     now = datetime.now(timezone.utc)
