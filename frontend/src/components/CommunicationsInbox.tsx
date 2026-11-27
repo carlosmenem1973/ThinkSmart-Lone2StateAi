@@ -85,7 +85,7 @@ export default function CommunicationsInbox({ apiFetch, role }: Props) {
     async function loadCrmContext() {
       const thread = selectedThread;
       if (!thread?.contact_id || !thread.contact_name) {
-        setContextContact(null); setPropertyMatches([]); return;
+        setContextContact(null); setPropertyMatches([]); setContextBusy(false); return;
       }
       setContextBusy(true);
       try {
