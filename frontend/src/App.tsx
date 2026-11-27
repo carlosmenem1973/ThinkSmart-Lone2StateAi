@@ -62,7 +62,7 @@ type Lead = {
 
 type Dashboard = {
   total_leads?: number;
-  by_status?: { new?: number };
+  by_status?: Record<string, number | undefined>;
   pending_followups?: number;
   pending_drafts?: number;
 };
