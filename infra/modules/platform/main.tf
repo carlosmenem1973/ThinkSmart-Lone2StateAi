@@ -193,13 +193,17 @@ resource "aws_cloudwatch_log_group" "beat" { name = "/ecs/${local.prefix}/beat"
   retention_in_days = var.environment == "prod" ? 90 : 14
   tags = local.common_tags }
 resource "aws_sqs_queue" "communications_dlq" {
-  name = "${local.prefix}-communications-dlq"
+  name = "${local.prefix}-communications-dlq.fifo"
+  fifo_queue = true
+  content_based_deduplication = true
   message_retention_seconds = 1209600
   sqs_managed_sse_enabled = true
   tags = local.common_tags
 }
 resource "aws_sqs_queue" "communications" {
-  name = "${local.prefix}-communications"
+  name = "${local.prefix}-communications.fifo"
+  fifo_queue = true
+  content_based_deduplication = true
   visibility_timeout_seconds = 120
   message_retention_seconds = 345600
   receive_wait_time_seconds = 10
