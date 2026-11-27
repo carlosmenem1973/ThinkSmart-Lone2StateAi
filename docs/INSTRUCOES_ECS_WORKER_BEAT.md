@@ -71,7 +71,7 @@ alembic upgrade head
 alembic current
 ```
 
-A revisão esperada deve ser obtida da release/branch efetivamente implantada; não fixar o procedimento em `0006_property_discovery`, porque a cadeia evoluiu e inclui migrações posteriores, incluindo `0009_communications` neste PR.
+A revisão esperada deve ser obtida da release/branch efetivamente implantada; não fixar o procedimento em `0006_property_discovery`, porque a cadeia evoluiu e inclui migrações posteriores, incluindo `0009_communications` e `0010_communications_outbox` neste PR.
 
 Não executar migrações em paralelo em cada réplica da API, Worker ou Beat. Fazer backup e seguir o processo de alteração de schema antes de executar em produção.
 
@@ -91,7 +91,7 @@ Não executar migrações em paralelo em cada réplica da API, Worker ou Beat. F
 
 ## 7. Estado do processamento de mensagens
 
-**Importante:** a separação ECS Worker/Beat e a permissão SES ficam preparadas pela infraestrutura. O envio de comunicações no código desta versão ainda é síncrono no processo API. Uma fila SQS e uma transactional outbox ainda não estão integradas no fluxo de aprovação/envio; portanto, não assumir que a infraestrutura já oferece entrega durável, retries seguros ou idempotência ponta a ponta.
+**Importante:** a aprovação grava a mensagem e o registo Outbox na mesma transação PostgreSQL. O Beat agenda o relay; o Worker publica apenas o ID da mensagem numa fila SQS FIFO cifrada e consome essa fila. A fila tem DLQ e redrive após cinco receções. O consumidor revalida permissões e consentimento antes de enviar. Resultados ambíguos são marcados `delivery_uncertain` e exigem reconciliação humana; não são reenviados automaticamente.
 
 Antes de ativar comunicações em produção, implementar:
 - registo Outbox na mesma transação que aprova a mensagem;
