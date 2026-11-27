@@ -334,6 +334,7 @@ def approve_message_draft(message_id: int, admin: User = Depends(require_admin_u
 
     channel = db.scalar(select(CommunicationChannel).where(
         CommunicationChannel.channel == thread.channel,
+        CommunicationChannel.provider == ("meta_whatsapp_cloud" if thread.channel == "whatsapp" else "aws_ses"),
         CommunicationChannel.enabled.is_(True),
         CommunicationChannel.outbound_enabled.is_(True),
     ).order_by(CommunicationChannel.id.desc()))
@@ -374,7 +375,7 @@ def approve_message_draft(message_id: int, admin: User = Depends(require_admin_u
         else:
             provider_message_id = send_email_ses(
                 str(destination),
-                message.subject or thread.subject or "Mensagem ThinkSmart AI",
+                thread.subject or "Mensagem ThinkSmart AI",
                 message.body,
             )
     except DeliveryError as exc:
