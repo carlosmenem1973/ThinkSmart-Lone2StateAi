@@ -81,6 +81,7 @@ This policy allows pushing an image to the existing API ECR repository, register
       "Effect": "Allow",
       "Action": [
         "ecr:BatchCheckLayerAvailability",
+        "ecr:BatchGetImage",
         "ecr:CompleteLayerUpload",
         "ecr:InitiateLayerUpload",
         "ecr:PutImage",
@@ -108,21 +109,23 @@ This policy allows pushing an image to the existing API ECR repository, register
       "Sid": "ManageOnlyApiTaskDefinitionFamily",
       "Effect": "Allow",
       "Action": [
-        "ecs:DescribeTaskDefinition",
         "ecs:RegisterTaskDefinition"
       ],
       "Resource": "arn:aws:ecs:eu-west-1:049451987829:task-definition/thinksmart-api:*"
     },
     {
-      "Sid": "RunAndInspectApiMigrationTasks",
+      "Sid": "DescribeTaskDefinitions",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeTaskDefinition",
+      "Resource": "*"
+    },
+    {
+      "Sid": "RunApiMigrationTasksOnlyInThinkSmartCluster",
       "Effect": "Allow",
       "Action": [
         "ecs:RunTask"
       ],
-      "Resource": [
-        "arn:aws:ecs:eu-west-1:049451987829:task-definition/thinksmart-api:*",
-        "arn:aws:ecs:eu-west-1:049451987829:cluster/thinksmart-cluster"
-      ],
+      "Resource": "arn:aws:ecs:eu-west-1:049451987829:task-definition/thinksmart-api:*",
       "Condition": {
         "ArnEquals": {
           "ecs:cluster": "arn:aws:ecs:eu-west-1:049451987829:cluster/thinksmart-cluster"
@@ -163,7 +166,7 @@ This policy allows pushing an image to the existing API ECR repository, register
 }
 ```
 
-No permission is granted to create or modify IAM roles, policies, OIDC providers, ECS clusters/services, networking, RDS, ElastiCache, SQS, Secrets Manager values, S3, or CloudFront.
+No permission is granted to create or modify IAM roles, policies, OIDC providers, ECS clusters/services, networking, RDS, ElastiCache, SQS, Secrets Manager values, S3, or CloudFront. ECS `DescribeTaskDefinition` requires `Resource: "*"` in the current service authorization model; all write actions remain scoped to the API task-definition family, API service, and target cluster. ECR `BatchGetImage` is included because Docker image push requires it per AWS documentation.
 
 ## Deployment behavior
 
