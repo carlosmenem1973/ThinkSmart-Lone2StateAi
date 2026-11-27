@@ -113,7 +113,7 @@ export default function CommunicationsInbox({ apiFetch, role }: Props) {
     setBusy(true); setError(''); setNotice('');
     try {
       await read(await apiFetch(`/communications/drafts/${messageId}/approve`, { method: 'POST' }));
-      setNotice('Mensagem enviada pelo fornecedor de comunicação.');
+      setNotice('Pedido de envio aceite pelo fornecedor. A confirmação de entrega ainda não está disponível.');
       await Promise.all([loadPending(), loadInbox()]);
       if (selected !== null) await loadMessages(selected);
     } catch (e) {
@@ -153,7 +153,7 @@ export default function CommunicationsInbox({ apiFetch, role }: Props) {
           <div className="comm-conversation-head"><div><b>{selectedThread.contact_name || 'Contacto não identificado'}</b><small>{selectedThread.channel.toUpperCase()} · {selectedThread.contact_id ? `Contacto #${selectedThread.contact_id}` : 'Sem correspondência CRM'}</small></div><span className="pill">{selectedThread.status}</span></div>
           <div className="comm-messages">
             {messages.map(item => <article key={item.id} className={item.direction === 'outbound' ? 'comm-message outbound' : 'comm-message inbound'}>
-              <div className="comm-message-meta"><b>{item.direction === 'outbound' ? 'Resposta preparada' : 'Mensagem recebida'}</b><span>{dateLabel(item.created_at)}</span></div>
+              <div className="comm-message-meta"><b>{item.direction === 'outbound' ? (item.status === 'sent' ? 'Mensagem aceite pelo fornecedor' : 'Resposta preparada') : 'Mensagem recebida'}</b><span>{dateLabel(item.created_at)}</span></div>
               <p>{item.body}</p>
               <small>Estado: {item.status.replace(/_/g, ' ')}</small>
               {item.status === 'pending_approval' && admin && <button disabled={busy} onClick={() => void approve(item.id)}><CheckCircle2 size={15}/> Enviar resposta aprovada</button>}
