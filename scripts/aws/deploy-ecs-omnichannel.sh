@@ -82,15 +82,13 @@ export AWS_REGION APP_SECRET_ID COMMUNICATIONS_SQS_QUEUE_URL REDIS_URL
 bash scripts/aws/merge-runtime-secrets.sh
 
 # Add ECS JSON-key references only for keys explicitly configured in this job.
-runtime_keys=(
+optional_runtime_keys=(
   META_WHATSAPP_ACCESS_TOKEN META_WHATSAPP_PHONE_NUMBER_ID META_WHATSAPP_APP_SECRET
   META_WHATSAPP_VERIFY_TOKEN META_GRAPH_API_VERSION EMAIL_FROM_ADDRESS SES_SENDER_VERIFIED
-  DATABASE_URL SECRET_KEY
   MICROSOFT_TENANT_ID MICROSOFT_CLIENT_ID MICROSOFT_CLIENT_SECRET MICROSOFT_GRAPH_SENDER
-  COMMUNICATIONS_SQS_QUEUE_URL REDIS_URL
 )
-configured_keys=()
-for key in "${runtime_keys[@]}"; do
+configured_keys=(DATABASE_URL SECRET_KEY COMMUNICATIONS_SQS_QUEUE_URL REDIS_URL)
+for key in "${optional_runtime_keys[@]}"; do
   [[ -n "${!key:-}" ]] && configured_keys+=("$key")
 done
 KEYS_JSON="$(printf '%s\n' "${configured_keys[@]}" | jq -Rsc 'split("\n") | map(select(length>0))')"
