@@ -100,7 +100,7 @@ Outbound dispatch is implemented for approved text messages:
 - WhatsApp uses Meta WhatsApp Cloud API Graph API v26.0 and a permanent system-user access token. Free-form text is permitted only when the latest inbound message in the same thread is less than 24 hours old. Outside that window the API rejects the send; approved template support is not implemented.
 - Email uses Amazon SES v2 in `AWS_REGION`, from `EMAIL_FROM_ADDRESS` (default `contacto@cbloft2.pt`). This avoids Microsoft Graph application permissions and Microsoft 365 tenant admin consent.
 - The approval endpoint re-checks global suppression, channel/purpose consent and expiry immediately before dispatch. It requires an enabled outbound channel, records provider IDs, sent timestamps and audit events, and marks provider failures as failed.
-- The API commits a `sending` state before calling the provider to reduce concurrent duplicate approvals. A process crash after provider acceptance but before the final database commit can still require manual reconciliation; a durable SQS outbox/worker is the next reliability improvement. Do not blindly retry messages in `sending`.
+- The API commits a `sending` state before calling the provider to reduce concurrent duplicate approvals. `sent` means accepted by the provider, not confirmed delivered to the recipient; delivery/read webhook persistence is not yet implemented. A process crash after provider acceptance but before the final database commit can still require manual reconciliation; a durable SQS outbox/worker is the next reliability improvement. Do not blindly retry messages in `sending`.
 
 ### AWS and Meta configuration
 
