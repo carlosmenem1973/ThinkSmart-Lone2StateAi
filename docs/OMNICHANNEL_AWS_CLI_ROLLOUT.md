@@ -89,6 +89,10 @@ Configurar variáveis separadas para DEV e PROD. Os valores sensíveis devem ser
 
 As variáveis opcionais de Meta, SES e Microsoft Graph só são adicionadas ao secret quando têm valor não vazio. A ausência de uma variável não apaga nem limpa a chave existente.
 
+A role OIDC do GitLab deve ter apenas as permissões necessárias para este job: leitura do cluster/serviços/task definitions/tarefas ECS; `ecs:RegisterTaskDefinition`, `ecs:RunTask`, `ecs:UpdateService`; `iam:PassRole` limitado às roles ECS aprovadas; push para o repositório ECR indicado; `secretsmanager:DescribeSecret`, `GetSecretValue` e `PutSecretValue` apenas no secret indicado; `sqs:GetQueueAttributes` apenas na fila indicada; escrita/listagem no bucket frontend e `cloudfront:CreateInvalidation` apenas na distribuição indicada. Não conceder permissões para criar VPC, RDS, Redis, SQS, IAM roles ou ECS services.
+
+A Task Role usada pelo Worker precisa separadamente de `sqs:SendMessage`, `ReceiveMessage`, `DeleteMessage`, `ChangeMessageVisibility` e `GetQueueAttributes` limitadas à fila e DLQ aprovadas. O pipeline não altera IAM e não adiciona essas permissões.
+
 **Bloqueio intencional:** o inventário Production anterior não encontrou serviços ECS Worker/Beat, fila SQS nem Redis. Portanto, o job de deployment deve falhar no preflight sem fazer alterações até esses recursos existirem e serem confirmados. Este pipeline não os cria.
 
 ## 5. Inventário AWS CLI — apenas leitura
