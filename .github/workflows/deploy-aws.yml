@@ -1,80 +1,40 @@
-name: Deploy ThinkSmart AI to AWS
+name: Deploy ThinkSmart AI API to AWS
 
 on:
   workflow_dispatch:
     inputs:
-      environment:
-        description: AWS environment to deploy
-        required: true
-        type: choice
-        options:
-          - development
-          - production
       confirm_production:
-        description: Type DEPLOY-PRODUCTION when selecting production
-        required: false
+        description: Type DEPLOY-PRODUCTION to deploy the production API
+        required: true
         type: string
 
 permissions:
   contents: read
 
 jobs:
-  deploy:
-    if: github.ref == 'refs/heads/main' && (inputs.environment != 'production' || inputs.confirm_production == 'DEPLOY-PRODUCTION')
+  deploy-api:
+    if: github.ref == 'refs/heads/main' && inputs.confirm_production == 'DEPLOY-PRODUCTION'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    environment: ${{ inputs.environment }}
+    timeout-minutes: 45
+    environment: production
     permissions:
       contents: read
       id-token: write
     concurrency:
-      group: thinksmart-deploy-${{ inputs.environment }}
+      group: thinksmart-api-production-deploy
       cancel-in-progress: false
     env:
       AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-1' }}
       AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
       ECR_REPOSITORY_NAME: ${{ vars.ECR_REPOSITORY_NAME }}
       ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
       ECS_API_SERVICE_NAME: ${{ vars.ECS_API_SERVICE_NAME }}
-      ECS_WORKER_SERVICE_NAME: ${{ vars.ECS_WORKER_SERVICE_NAME }}
-      ECS_BEAT_SERVICE_NAME: ${{ vars.ECS_BEAT_SERVICE_NAME }}
       ECS_API_CONTAINER_NAME: ${{ vars.ECS_API_CONTAINER_NAME }}
-      ECS_WORKER_CONTAINER_NAME: ${{ vars.ECS_WORKER_CONTAINER_NAME }}
-      ECS_BEAT_CONTAINER_NAME: ${{ vars.ECS_BEAT_CONTAINER_NAME }}
-      APP_SECRET_ID: ${{ vars.APP_SECRET_ID }}
-      COMMUNICATIONS_SQS_QUEUE_URL: ${{ vars.COMMUNICATIONS_SQS_QUEUE_URL }}
-      REDIS_URL: ${{ secrets.REDIS_URL }}
-      FRONTEND_BUCKET: ${{ vars.FRONTEND_BUCKET }}
-      CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
-      META_WHATSAPP_ACCESS_TOKEN: ${{ secrets.META_WHATSAPP_ACCESS_TOKEN }}
-      META_WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.META_WHATSAPP_PHONE_NUMBER_ID }}
-      META_WHATSAPP_APP_SECRET: ${{ secrets.META_WHATSAPP_APP_SECRET }}
-      META_WHATSAPP_VERIFY_TOKEN: ${{ secrets.META_WHATSAPP_VERIFY_TOKEN }}
-      META_GRAPH_API_VERSION: ${{ vars.META_GRAPH_API_VERSION }}
-      EMAIL_FROM_ADDRESS: ${{ vars.EMAIL_FROM_ADDRESS }}
-      SES_SENDER_VERIFIED: ${{ vars.SES_SENDER_VERIFIED }}
-      MICROSOFT_TENANT_ID: ${{ secrets.MICROSOFT_TENANT_ID }}
-      MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
-      MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
-      MICROSOFT_GRAPH_SENDER: ${{ vars.MICROSOFT_GRAPH_SENDER }}
+      IMAGE_TAG: ${{ github.sha }}-${{ github.run_number }}
     steps:
-      - name: Require production confirmation
-        if: inputs.environment == 'production'
-        run: |
-          test "${{ inputs.confirm_production }}" = "DEPLOY-PRODUCTION" || {
-            echo "Production deployment requires the exact confirmation DEPLOY-PRODUCTION."
-            exit 1
-          }
-
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Configure Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
 
       - name: Install deployment utilities
         run: |
@@ -84,33 +44,25 @@ jobs:
           docker --version
           jq --version
 
-      - name: Validate required GitHub Environment configuration
-        env:
-          AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+      - name: Validate production configuration
         run: |
           set -eu
-          for name in AWS_ROLE_ARN AWS_ACCOUNT_ID ECR_REPOSITORY_NAME ECS_CLUSTER_NAME \
-            ECS_API_SERVICE_NAME ECS_WORKER_SERVICE_NAME ECS_BEAT_SERVICE_NAME \
-            ECS_API_CONTAINER_NAME ECS_WORKER_CONTAINER_NAME ECS_BEAT_CONTAINER_NAME \
-            APP_SECRET_ID COMMUNICATIONS_SQS_QUEUE_URL REDIS_URL FRONTEND_BUCKET \
-            CLOUDFRONT_DISTRIBUTION_ID; do
+          for name in AWS_ACCOUNT_ID AWS_ROLE_ARN ECR_REPOSITORY_NAME \
+            ECS_CLUSTER_NAME ECS_API_SERVICE_NAME ECS_API_CONTAINER_NAME; do
             value="${!name:-}"
             if [ -z "$value" ]; then
-              echo "Missing GitHub Environment variable/secret: $name" >&2
+              echo "Missing GitHub Environment variable: $name" >&2
               exit 2
             fi
           done
-          case "$REDIS_URL" in
-            rediss://*) ;;
-            *) echo "REDIS_URL must use rediss:// TLS." >&2; exit 2 ;;
-          esac
+          test "$AWS_ACCOUNT_ID" = "049451987829"
 
-      - name: Authenticate to AWS with GitHub OIDC
+      - name: Configure AWS credentials using GitHub OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-          role-session-name: github-${{ github.run_id }}-${{ github.run_attempt }}
+          role-session-name: github-api-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Verify AWS account
         run: |
@@ -121,7 +73,5 @@ jobs:
             exit 2
           }
 
-      - name: Deploy API, Worker, Beat and frontend
-        env:
-          IMAGE_TAG: ${{ github.sha }}-${{ github.run_number }}
-        run: bash scripts/aws/deploy-ecs-omnichannel.sh
+      - name: Deploy API only
+        run: bash scripts/aws/deploy-ecs-api.sh
