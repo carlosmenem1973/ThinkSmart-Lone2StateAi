@@ -83,7 +83,7 @@ jobs:
           alembic downgrade base
           alembic upgrade head
 
-  gitlab-deploy-config:
+  deployment-config:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -92,20 +92,20 @@ jobs:
           python-version: "3.12"
       - name: Install YAML parser
         run: python -m pip install --disable-pip-version-check PyYAML
-      - name: Validate GitLab pipeline YAML and AWS CLI deployment scripts
+      - name: Validate GitHub Actions deployment workflow and AWS CLI scripts
         run: |
           python - <<'PY'
           import yaml
-          with open(".gitlab-ci.yml", encoding="utf-8") as stream:
-              config = yaml.safe_load(stream)
-          deploy_script = "\n".join(config[".deploy_environment"]["script"])
-          assert "scripts/aws/deploy-ecs-omnichannel.sh" in deploy_script
-          assert "tofu apply" not in deploy_script
-          assert "set-runtime-secrets.sh" not in deploy_script
-          with open("/tmp/gitlab-deploy.sh", "w", encoding="utf-8") as stream:
-              stream.write(deploy_script)
+          with open(".github/workflows/deploy-aws.yml", encoding="utf-8") as stream:
+              workflow = yaml.load(stream, Loader=yaml.BaseLoader)
+          assert "workflow_dispatch" in workflow["on"]
+          assert "deploy" in workflow["jobs"]
+          deploy = workflow["jobs"]["deploy"]
+          assert deploy["permissions"]["id-token"] == "write"
+          assert "aws-actions/configure-aws-credentials@v4" in str(deploy["steps"])
+          assert "scripts/aws/deploy-ecs-omnichannel.sh" in str(deploy["steps"])
+          assert "tofu apply" not in str(deploy["steps"])
           PY
-          bash -n /tmp/gitlab-deploy.sh
           bash -n scripts/aws/merge-runtime-secrets.sh
           bash -n scripts/aws/deploy-ecs-omnichannel.sh
 
