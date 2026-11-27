@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     microsoft_tenant_id: str = "common"
     microsoft_client_id: str = ""
     microsoft_client_secret: str = ""
+    # App-only Microsoft Graph sender; requires tenant-specific Mail.Send application permission.
+    microsoft_graph_sender: str = ""
     microsoft_redirect_uri: str = (
         "https://estateai.example.pt/api/v1/integrations/microsoft/callback"
     )

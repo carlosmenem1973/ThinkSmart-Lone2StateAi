@@ -158,6 +158,17 @@ def configure_channel_outbound(
                 raise HTTPException(status_code=503, detail="Verify the SES sender identity and set SES_SENDER_VERIFIED=true after DNS verification")
             if (row.sender_identifier or "").strip().lower() != sender:
                 raise HTTPException(status_code=409, detail="Channel sender_identifier must match EMAIL_FROM_ADDRESS")
+        elif row.channel == "email" and row.provider == "microsoft_graph":
+            if (
+                not settings.microsoft_tenant_id
+                or settings.microsoft_tenant_id.lower() == "common"
+                or not settings.microsoft_client_id
+                or not settings.microsoft_client_secret
+                or not settings.microsoft_graph_sender
+            ):
+                raise HTTPException(status_code=503, detail="Configure tenant-specific Microsoft Graph app credentials and sender mailbox first")
+            if (row.sender_identifier or "").strip().lower() != settings.microsoft_graph_sender.strip().lower():
+                raise HTTPException(status_code=409, detail="Channel sender_identifier must match MICROSOFT_GRAPH_SENDER")
         else:
             raise HTTPException(status_code=422, detail="Outbound provider is not supported")
     row.outbound_enabled = payload.enabled

@@ -70,3 +70,55 @@ def test_delivery_error_exposes_ambiguous_outcome_for_manual_reconciliation():
 
     assert ambiguous.ambiguous is True
     assert definitive.ambiguous is False
+
+
+
+def test_microsoft_graph_email_uses_app_only_token_and_configured_mailbox(monkeypatch):
+    captured = {}
+
+    class FakeMsalApp:
+        def __init__(self, client_id, authority, client_credential):
+            captured["client_id"] = client_id
+            captured["authority"] = authority
+            captured["client_credential"] = client_credential
+
+        def acquire_token_for_client(self, scopes):
+            captured["scopes"] = scopes
+            return {"access_token": "graph-test-token"}
+
+    monkeypatch.setattr(delivery.msal, "ConfidentialClientApplication", FakeMsalApp)
+    monkeypatch.setattr(settings, "microsoft_tenant_id", "tenant-guid")
+    monkeypatch.setattr(settings, "microsoft_client_id", "client-guid")
+    monkeypatch.setattr(settings, "microsoft_client_secret", "client-secret")
+    monkeypatch.setattr(settings, "microsoft_graph_sender", "contacto@cbloft2.pt")
+
+    def fake_post(url, **kwargs):
+        captured["url"] = url
+        captured.update(kwargs)
+        return FakeResponse({})
+
+    monkeypatch.setattr(delivery.httpx, "post", fake_post)
+    result = delivery.send_email_microsoft_graph(
+        "cliente@example.com", "Imóvel disponível", "Bom dia"
+    )
+
+    assert result.startswith("graph-accepted-")
+    assert captured["authority"] == "https://login.microsoftonline.com/tenant-guid"
+    assert captured["scopes"] == ["https://graph.microsoft.com/.default"]
+    assert captured["url"].endswith("/users/contacto@cbloft2.pt/sendMail")
+    assert captured["headers"]["Authorization"] == "Bearer graph-test-token"
+    assert captured["json"]["message"]["toRecipients"][0]["emailAddress"]["address"] == "cliente@example.com"
+
+
+def test_microsoft_graph_sender_requires_tenant_specific_configuration(monkeypatch):
+    monkeypatch.setattr(settings, "microsoft_tenant_id", "common")
+    monkeypatch.setattr(settings, "microsoft_client_id", "client-guid")
+    monkeypatch.setattr(settings, "microsoft_client_secret", "client-secret")
+    monkeypatch.setattr(settings, "microsoft_graph_sender", "contacto@cbloft2.pt")
+
+    try:
+        delivery.send_email_microsoft_graph("cliente@example.com", "Assunto", "Texto")
+    except delivery.DeliveryError as exc:
+        assert exc.code == "microsoft_graph_sender_not_configured"
+    else:
+        raise AssertionError("Microsoft Graph app-only sending must require a tenant ID")

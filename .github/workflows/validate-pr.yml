@@ -2,7 +2,7 @@ name: Validate ThinkSmart PR
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feature/omnichannel-communications-foundation]
   push:
     branches:
       - fix/pr5-voice-property-discovery-conflicts
@@ -108,6 +108,7 @@ jobs:
           PY
           bash -n /tmp/gitlab-deploy.sh
           bash -n scripts/aws/set-runtime-secrets.sh
+          bash -n scripts/aws/merge-runtime-secrets.sh
 
   infrastructure:
     runs-on: ubuntu-latest
