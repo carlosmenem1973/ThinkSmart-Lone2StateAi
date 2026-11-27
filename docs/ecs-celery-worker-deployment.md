@@ -2,7 +2,7 @@
 
 ## Topology
 
-OpenTofu defines three independent Fargate services in the existing cluster:
+The GitLab rollout uses AWS CLI against pre-existing ECS resources. OpenTofu files remain for infrastructure validation/reference and are not applied by the deployment pipeline. The pipeline expects these three Fargate services to exist in the approved cluster:
 
 | Service | Process | Desired count |
 |---|---|---:|
@@ -14,12 +14,12 @@ Worker consumes tasks; Beat publishes periodic tasks. Never run `celery worker -
 
 ## Task definitions
 
-Task definition families:
+The following task-definition families/services must be provisioned before the AWS CLI deployment job can run:
 - `thinksmart-lone2stateai-prod-api`
 - `thinksmart-lone2stateai-prod-worker`
 - `thinksmart-lone2stateai-prod-beat`
 
-Worker and Beat use the worker ECR repository and the same immutable image tag as the API release. The GitLab deployment pipeline builds once, pushes the API image, tags the same image for the worker repository, and waits for all three ECS services to stabilize.
+API, Worker and Beat task definitions are updated to the same immutable image URI in the existing ECR repository. The pipeline does not create ECR repositories, ECS services, queues, Redis or IAM policies.
 
 Worker command:
 
@@ -46,7 +46,7 @@ The application Secrets Manager JSON contains the Meta and SES settings used by 
 - `EMAIL_FROM_ADDRESS`
 - `SES_SENDER_VERIFIED`
 
-New keys are initially empty/defaulted by infrastructure. GitLab deployment variables may populate them through `scripts/aws/set-runtime-secrets.sh`. Use protected/masked GitLab variables for tokens and secrets; never commit their values.
+GitLab deployment variables populate only explicitly supplied keys through `scripts/aws/merge-runtime-secrets.sh`. Existing JSON keys are preserved. The older `set-runtime-secrets.sh` is not used by the pipeline because it replaces the complete JSON document.
 
 SES:
 - Sender: `contacto@cbloft2.pt`
@@ -79,16 +79,16 @@ Use the actual current head revision from the approved release. Do not hard-code
 
 Rollout order:
 1. Obtain green CI and approve the PR.
-2. Build/push the backend image to API and worker ECR repositories.
-3. Review the OpenTofu plan before applying.
-4. Register the release task definitions while API, Worker and Beat desired counts remain zero.
-5. Run `alembic upgrade head` once as a one-off ECS task and verify its exit code. The GitLab pipeline gates service startup on successful migration.
-6. Scale API and Worker to their configured counts and start Beat with desired count exactly 1.
+2. Confirm by AWS CLI that the existing ECS cluster, API/Worker/Beat services, encrypted SQS FIFO queue, Redis, ECR, Secrets Manager secret, S3 bucket and CloudFront distribution are present.
+3. Trigger the manual GitLab AWS CLI deployment job. It performs a read-only preflight before any remote writes and fails closed if a required resource is missing.
+4. The pipeline builds the artifacts, pushes one immutable image, merges only explicitly configured secret keys, and registers new revisions of the existing task definitions.
+5. Run `alembic upgrade head` once as a one-off ECS task and verify its exit code. The pipeline does not update any service if migration fails.
+6. Update the three existing ECS services and wait for them to stabilize; Beat must remain at desired count exactly 1.
 7. Verify CloudWatch logs and scheduled task publication.
 8. Configure SES and Meta while outbound channels remain disabled.
 9. Enable channels only after legal, operational and human approval.
 
-The GitLab pipeline sets Beat to zero during bootstrap, then to one only after runtime secrets are populated. Production deployment remains manual.
+The GitLab deployment jobs are manual and run only from `main`. They do not bootstrap or provision infrastructure. The preflight requires Beat to be already running with desired count exactly 1.
 
 ## Delivery reliability boundary
 
