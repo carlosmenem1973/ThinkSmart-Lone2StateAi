@@ -42,7 +42,8 @@ printf '%s' "$SERVICES_JSON" | jq -e --arg api "$ECS_API_SERVICE_NAME" \
   all(.services[]; .status == "ACTIVE" and (.taskDefinition | type == "string")) and
   ([.services[] | select(.serviceName == $api) | .desiredCount] | all(.[]; . >= 1)) and
   ([.services[] | select(.serviceName == $worker) | .desiredCount] | all(.[]; . >= 1)) and
-  ([.services[] | select(.serviceName == $beat) | .desiredCount] == [1])
+  ([.services[] | select(.serviceName == $beat) | .desiredCount] == [1]) and
+  ([.services[] | select(.serviceName == $beat) | .deploymentConfiguration.maximumPercent] == [100])
 ' >/dev/null || {
   echo "API, Worker and Beat ECS services must already exist and be ACTIVE. No resources will be provisioned by this pipeline." >&2
   exit 2
