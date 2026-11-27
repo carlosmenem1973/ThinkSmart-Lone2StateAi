@@ -12,6 +12,8 @@ type Message = {
   requires_approval: boolean; approved_by: number | null; approved_at: string | null;
   sent_at: string | null; created_at: string;
 };
+type ContactContext = { id: number; contact_type: 'owner' | 'client'; full_name: string; email?: string | null; phone?: string | null; municipality?: string | null; district?: string | null; property_preferences?: string | null; budget_min?: number | null; budget_max?: number | null; contact_permission: boolean; do_not_contact: boolean; lawful_basis?: string | null; active: boolean };
+type PropertyMatch = { lead_id: number; title: string; property_type?: string | null; address?: string | null; municipality?: string | null; district?: string | null; price?: string | number | null; area?: string | number | null; bedrooms?: string | number | null; score?: number; explanation?: string; owner_link?: string; owner_identity_verified?: boolean };
 type PendingDraft = {
   message_id: number; thread_id: number; contact_id: number | null; contact_name: string | null;
   channel: string; subject: string | null; body: string; created_at: string; requires_approval: boolean;
@@ -37,6 +39,9 @@ export default function CommunicationsInbox({ apiFetch, role }: Props) {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [pending, setPending] = useState<PendingDraft[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [contextContact, setContextContact] = useState<ContactContext | null>(null);
+  const [propertyMatches, setPropertyMatches] = useState<PropertyMatch[]>([]);
+  const [contextBusy, setContextBusy] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -68,10 +73,34 @@ export default function CommunicationsInbox({ apiFetch, role }: Props) {
     if (role === 'viewer') return;
     void loadInbox(); void loadPending();
   }, [loadInbox, loadPending, role]);
+  const selectedThread = threads.find(thread => thread.id === selected) ?? null;
+
   useEffect(() => {
     if (selected !== null) void loadMessages(selected);
     else setMessages([]);
   }, [selected, loadMessages]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadCrmContext() {
+      const thread = selectedThread;
+      if (!thread?.contact_id || !thread.contact_name) {
+        setContextContact(null); setPropertyMatches([]); return;
+      }
+      setContextBusy(true);
+      try {
+        const rows = await read<ContactContext[]>(await apiFetch(`/contacts?q=${encodeURIComponent(thread.contact_name)}`));
+        const contact = rows.find(row => row.id === thread.contact_id);
+        if (!contact) { if (!cancelled) { setContextContact(null); setPropertyMatches([]); } return; }
+        const matching = await read<{ matches: PropertyMatch[] }>(await apiFetch(`/matching/contacts/${contact.id}/properties?limit=8&min_score=35`));
+        if (!cancelled) { setContextContact(contact); setPropertyMatches(matching.matches || []); }
+      } catch {
+        if (!cancelled) { setContextContact(null); setPropertyMatches([]); }
+      } finally { if (!cancelled) setContextBusy(false); }
+    }
+    void loadCrmContext();
+    return () => { cancelled = true; };
+  }, [selectedThread?.id, selectedThread?.contact_id, selectedThread?.contact_name, apiFetch]);
 
   const visibleThreads = useMemo(() => {
     if (tab === 'whatsapp') return threads.filter(thread => thread.channel === 'whatsapp');
@@ -92,7 +121,6 @@ export default function CommunicationsInbox({ apiFetch, role }: Props) {
     } finally { setBusy(false); }
   }
 
-  const selectedThread = threads.find(thread => thread.id === selected) ?? null;
   if (role === 'viewer') return <section className="panel comm-panel"><p className="empty">A conta de consulta não tem acesso à caixa de entrada de comunicações.</p></section>;
   return <section className="panel comm-panel">
     <div className="panelhead">
@@ -134,6 +162,27 @@ export default function CommunicationsInbox({ apiFetch, role }: Props) {
           </div>
         </> : <p className="empty">Seleciona uma conversa na lista.</p>}
       </div>
+      <aside className="comm-crm-context" aria-label="Contexto CRM do contacto">
+        <div className="comm-list-heading">Contexto CRM <small>{contextBusy ? 'A carregar…' : contextContact ? 'Ligado' : '—'}</small></div>
+        {contextBusy ? <p className="empty">A carregar dados do CRM…</p> : contextContact ? <>
+          <div className="comm-crm-profile">
+            <span className="comm-crm-avatar">{contextContact.full_name.split(/\s+/).map(part => part[0]).slice(0, 2).join('').toUpperCase()}</span>
+            <b>{contextContact.full_name}</b>
+            <span className="comm-crm-type">{contextContact.contact_type === 'client' ? 'Cliente' : 'Proprietário'}</span>
+          </div>
+          <dl className="comm-crm-fields">
+            <dt>Email</dt><dd>{contextContact.email || 'Não indicado'}</dd>
+            <dt>Telefone</dt><dd>{contextContact.phone || 'Não indicado'}</dd>
+            <dt>Localização</dt><dd>{[contextContact.municipality, contextContact.district].filter(Boolean).join(', ') || 'Não indicada'}</dd>
+            {contextContact.contact_type === 'client' && <><dt>Orçamento</dt><dd>{contextContact.budget_min || contextContact.budget_max ? `${contextContact.budget_min ?? '—'} € – ${contextContact.budget_max ?? '—'} €` : 'Não indicado'}</dd><dt>Preferências</dt><dd>{contextContact.property_preferences || 'Não indicadas'}</dd></>}
+          </dl>
+          <div className="comm-crm-consent"><span>{contextContact.contact_permission ? 'Permissão de contacto registada' : 'Sem permissão de contacto registada'}</span><span>{contextContact.do_not_contact ? 'Não contactar' : 'Supressão global não ativa'}</span></div>
+          <div className="comm-crm-matches"><b>{contextContact.contact_type === 'client' ? 'Imóveis compatíveis' : 'Imóveis associados'}</b>
+            {propertyMatches.map(item => <article key={item.lead_id} className="comm-property-match"><b>{item.title || `Imóvel #${item.lead_id}`}</b><small>{[item.municipality, item.district].filter(Boolean).join(', ') || item.address || 'Localização não indicada'}</small>{item.price && <small>{item.price} €</small>}{typeof item.score === 'number' && <small>Compatibilidade: {item.score}%</small>}{item.owner_identity_verified === false && <small>Associação CRM; propriedade não verificada</small>}</article>)}
+            {!propertyMatches.length && <p className="empty">Sem imóveis relacionados encontrados.</p>}
+          </div>
+        </> : <p className="empty">Esta conversa não está ligada a um contacto CRM identificado.</p>}
+      </aside>
     </div>
     <div className="comm-safety-note"><ShieldCheck size={15}/> A aprovação fica registada para auditoria. O envio externo continua desativado; aprovar não envia WhatsApp nem Email.</div>
     {!admin && <p className="comm-role-note">A aprovação de respostas está reservada a administradores. Podes consultar as conversas dentro das tuas permissões.</p>}
