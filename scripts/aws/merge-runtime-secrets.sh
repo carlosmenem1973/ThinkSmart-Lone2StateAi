@@ -1,34 +1,38 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Merge only explicitly supplied runtime keys into an existing Secrets Manager
-# JSON document. Unspecified keys are preserved. This script does not provision
-# IAM, ECS, queues, networking, or deploy application code.
+# Merge explicitly supplied runtime settings into an existing JSON secret.
+# Existing keys are preserved; secret contents never enter command arguments or logs.
 
 : "${AWS_REGION:?Set AWS_REGION}"
 : "${APP_SECRET_ID:?Set APP_SECRET_ID to the existing application secret name or ARN}"
 
-CURRENT_SECRET="$(aws secretsmanager get-secret-value \
+CURRENT_FILE="$(mktemp)"
+OUTPUT_FILE="$(mktemp)"
+chmod 600 "$CURRENT_FILE" "$OUTPUT_FILE"
+cleanup() {
+  rm -f "$CURRENT_FILE" "$OUTPUT_FILE"
+}
+trap cleanup EXIT
+
+aws secretsmanager get-secret-value \
   --region "$AWS_REGION" \
   --secret-id "$APP_SECRET_ID" \
-  --query SecretString --output text)"
+  --query SecretString \
+  --output text > "$CURRENT_FILE"
 
-TMP_FILE="$(mktemp)"
-chmod 600 "$TMP_FILE"
-trap 'rm -f "$TMP_FILE"; unset CURRENT_SECRET' EXIT
-
-export CURRENT_SECRET
-python3 - "$TMP_FILE" <<'PY'
+python3 - "$CURRENT_FILE" "$OUTPUT_FILE" <<'PY'
 import json
 import os
 import sys
 
-secret = json.loads(os.environ["CURRENT_SECRET"])
+source_path, output_path = sys.argv[1:3]
+with open(source_path, encoding="utf-8") as source:
+    secret = json.load(source)
 if not isinstance(secret, dict):
     raise SystemExit("Existing Secrets Manager value must be a JSON object")
 
-# Only non-empty values explicitly supplied by the operator are changed.
-allowed = {
+allowed = (
     "META_WHATSAPP_ACCESS_TOKEN",
     "META_WHATSAPP_PHONE_NUMBER_ID",
     "META_WHATSAPP_APP_SECRET",
@@ -42,19 +46,19 @@ allowed = {
     "MICROSOFT_GRAPH_SENDER",
     "COMMUNICATIONS_SQS_QUEUE_URL",
     "REDIS_URL",
-}
+)
 for key in allowed:
     value = os.environ.get(key)
     if value is not None and value != "":
         secret[key] = value
 
-with open(sys.argv[1], "w", encoding="utf-8") as output:
+with open(output_path, "w", encoding="utf-8") as output:
     json.dump(secret, output, separators=(",", ":"))
 PY
 
 aws secretsmanager put-secret-value \
   --region "$AWS_REGION" \
   --secret-id "$APP_SECRET_ID" \
-  --secret-string "file://$TMP_FILE" >/dev/null
+  --secret-string "file://$OUTPUT_FILE" >/dev/null
 
-printf 'Updated only explicitly supplied runtime keys; all other secret keys were preserved.\n'
+printf 'Runtime secret updated selectively; existing keys were preserved.\n'
