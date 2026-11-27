@@ -14,10 +14,8 @@ celery.conf.update(
     timezone=settings.timezone,
     enable_utc=True,
     beat_schedule={
-        "daily-lead-research": {
-            "task": "app.workers.tasks.daily_research",
-            "schedule": 86400.0,
-        },
+        # Property discovery is the only recurring web-search schedule. It is
+        # gated by the administrator-controlled search_enabled setting.
         "property-discovery-scheduler": {
             "task": "app.workers.contact_ai_tasks.run_scheduled_property_discovery",
             "schedule": 300.0,
