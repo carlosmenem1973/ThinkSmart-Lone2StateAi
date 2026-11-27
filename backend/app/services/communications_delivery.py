@@ -19,7 +19,7 @@ def _normalise_whatsapp_number(value: str) -> str:
     digits = re.sub(r"\D", "", value or "")
     if digits.startswith("00"):
         digits = digits[2:]
-    if not digits or len(digits) < 8:
+    if not digits or not 8 <= len(digits) <= 15:
         raise DeliveryError("invalid_recipient_phone")
     return digits
 
@@ -29,6 +29,8 @@ def send_whatsapp_text(destination: str, body: str) -> str:
     phone_number_id = settings.meta_whatsapp_phone_number_id
     if not token or not phone_number_id:
         raise DeliveryError("whatsapp_provider_not_configured")
+    if not body or len(body) > 4096:
+        raise DeliveryError("whatsapp_text_length_invalid")
     url = f"https://graph.facebook.com/{settings.meta_graph_api_version}/{phone_number_id}/messages"
     payload = {
         "messaging_product": "whatsapp",
