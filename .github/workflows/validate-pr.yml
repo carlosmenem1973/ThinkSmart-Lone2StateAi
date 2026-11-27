@@ -98,7 +98,7 @@ jobs:
           import yaml
           with open(".gitlab-ci.yml", encoding="utf-8") as stream:
               config = yaml.safe_load(stream)
-          deploy_script = "\\n".join(config[".deploy_environment"]["script"])
+          deploy_script = "\n".join(config[".deploy_environment"]["script"])
           assert "scripts/aws/deploy-ecs-omnichannel.sh" in deploy_script
           assert "tofu apply" not in deploy_script
           assert "set-runtime-secrets.sh" not in deploy_script
