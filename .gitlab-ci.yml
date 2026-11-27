@@ -135,7 +135,47 @@ validate_backend_syntax:
       export SES_SENDER_VERIFIED="${ENV_SES_SENDER_VERIFIED:-false}"
       ./scripts/aws/set-runtime-secrets.sh
 
-      # Start the API and worker only after images and runtime secrets are ready.
+      # Register the release task definitions but keep all ECS services stopped
+      # until the database migration has completed successfully.
+      tofu -chdir="$TF_DIR" apply -auto-approve \
+        -var="api_image_tag=${IMAGE_TAG}" \
+        -var="api_desired_count=0" \
+        -var="worker_desired_count=0" \
+        -var="beat_desired_count=0" \
+        -var="gitlab_oidc_provider_arn=${GITLAB_OIDC_PROVIDER_ARN}" \
+        -var="gitlab_subject=${GITLAB_OIDC_SUBJECT}"
+
+      ECS_CLUSTER="$(tofu -chdir="$TF_DIR" output -raw ecs_cluster_name)"
+      API_SERVICE="$(tofu -chdir="$TF_DIR" output -raw api_service_name)"
+      API_TASK_DEFINITION="$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$API_SERVICE" --query 'services[0].taskDefinition' --output text)"
+      PRIVATE_SUBNETS="$(tofu -chdir="$TF_DIR" output -json private_subnet_ids | python3 -c 'import json,sys; print(",".join(json.load(sys.stdin)))')"
+      ECS_SECURITY_GROUP="$(tofu -chdir="$TF_DIR" output -raw ecs_security_group_id)"
+
+      # Run Alembic exactly once as a one-off task before API/Worker/Beat start.
+      MIGRATION_RUN="$(aws ecs run-task \
+        --cluster "$ECS_CLUSTER" \
+        --task-definition "$API_TASK_DEFINITION" \
+        --launch-type FARGATE \
+        --network-configuration "awsvpcConfiguration={subnets=[${PRIVATE_SUBNETS}],securityGroups=[${ECS_SECURITY_GROUP}],assignPublicIp=DISABLED}" \
+        --overrides '{"containerOverrides":[{"name":"api","command":["alembic","upgrade","head"]}]}' \
+        --started-by "thinksmart-migration-${CI_PIPELINE_IID}" \
+        --output json)"
+      MIGRATION_TASK_ARN="$(printf '%s' "$MIGRATION_RUN" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["tasks"][0]["taskArn"] if d.get("tasks") else "")')"
+      if [ -z "$MIGRATION_TASK_ARN" ]; then
+        printf '%s\\n' "$MIGRATION_RUN"
+        echo "Could not start the Alembic migration task" >&2
+        exit 1
+      fi
+      aws ecs wait tasks-stopped --cluster "$ECS_CLUSTER" --tasks "$MIGRATION_TASK_ARN"
+      MIGRATION_TASK_INFO="$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$MIGRATION_TASK_ARN" --output json)"
+      MIGRATION_EXIT_CODE="$(printf '%s' "$MIGRATION_TASK_INFO" | python3 -c 'import json,sys; d=json.load(sys.stdin); cs=d["tasks"][0]["containers"]; c=next((x for x in cs if x["name"]=="api"),{}); print(c.get("exitCode",""))')"
+      if [ "$MIGRATION_EXIT_CODE" != "0" ]; then
+        printf '%s\\n' "$MIGRATION_TASK_INFO"
+        echo "Alembic migration failed; ECS services will remain stopped" >&2
+        exit 1
+      fi
+
+      # Start application services only after successful schema migration.
       tofu -chdir="$TF_DIR" apply -auto-approve \
         -var="api_image_tag=${IMAGE_TAG}" \
         -var="api_desired_count=${API_DESIRED_COUNT}" \
