@@ -129,10 +129,10 @@ Content-Type: application/json
 ```
 For WhatsApp, register the existing Meta channel and enable outbound with the same outbound endpoint after the permanent token and phone-number ID are present. The inbound endpoint remains separately configured.
 
-Approving a pending draft now sends it through the selected provider; it is no longer an audit-only action. Delivery is synchronous in the API process in this increment; move it to an SQS transactional outbox and ECS worker with retries, DLQ, idempotent completion and status webhooks before high-volume production use. Voice is not implemented.
+Approving a pending draft now commits the approval and a `communication_outbox` row in one database transaction. A Celery relay publishes only the message ID to an encrypted SQS FIFO queue; the ECS Worker revalidates consent/channel state and performs provider delivery. A DLQ is configured with a five-receive redrive threshold. The consumer uses database message state and FIFO deduplication to avoid blind resend after ambiguous outcomes; such cases are marked `delivery_uncertain` for reconciliation. Provider acceptance is still not proof of delivery. Voice is not implemented.
 
 ## Database migration
-The communications models and Alembic migration `0009_communications` are part of this PR branch. Apply and validate the migration against a disposable PostgreSQL database before deploying the API. No new database table was added for the WhatsApp webhook increment; it reuses the existing communications tables and webhook idempotency ledger.
+The communications models and Alembic migrations `0009_communications` and `0010_communications_outbox` are part of this PR branch. Apply and validate the migration chain against disposable PostgreSQL before deploying. The outbox table stores delivery state and references the message; SQS payloads contain only the message ID, not recipient details or message content.
 
 
 ## Portal UI — Contact AI
@@ -161,4 +161,4 @@ The workspace uses a responsive three-column layout on wide screens:
 The CRM panel resolves the linked contact through the permission-scoped contacts search and then calls the matching endpoint. Unlinked/unknown senders show no CRM profile. Owner-to-property associations are explicitly labelled as CRM matches and do not verify legal ownership. The layout collapses to two columns and then one column on smaller screens.
 
 
-**Important:** approving a draft triggers provider delivery only when an administrator has enabled a verified outbound channel. The approval action is an external send operation; verify the recipient, content and consent before approving.
+**Important:** approving a draft triggers provider delivery only when an administrator has enabled a verified outbound channel. The approval action durably queues the external send; verify the recipient, content and consent before approving. The UI must display `queued`, `sending`, `sent`, `failed` and `delivery_uncertain` distinctly.
