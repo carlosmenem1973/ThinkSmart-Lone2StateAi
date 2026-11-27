@@ -117,4 +117,12 @@ The frontend uses the authenticated API routes:
 
 The pending-drafts endpoint is permission-scoped: sellers only see drafts assigned to their threads; administrators and managers can see workspace drafts; viewer accounts are denied. Approval is administrator-only.
 
+The workspace uses a responsive three-column layout on wide screens:
+- **Left:** thread list and channel/approval filters.
+- **Center:** selected conversation and message history, with administrator-only approval controls.
+- **Right:** permission-scoped CRM context for the linked contact, including contact type, email/phone, location, client budget/preferences, consent/suppression indicators, and up to eight deterministic property matches from `GET /api/v1/matching/contacts/{contact_id}/properties`.
+
+The CRM panel resolves the linked contact through the permission-scoped contacts search and then calls the matching endpoint. Unlinked/unknown senders show no CRM profile. Owner-to-property associations are explicitly labelled as CRM matches and do not verify legal ownership. The layout collapses to two columns and then one column on smaller screens.
+
+
 **Important:** approving a draft records the approval and audit event only. It does not send a WhatsApp or email message. Outbound delivery remains disabled until provider send adapters and the corresponding safeguards are implemented.
