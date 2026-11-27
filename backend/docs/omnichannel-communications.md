@@ -7,7 +7,7 @@
 - Customers and property owners are represented by CRM contacts, with contact_type set to client or owner.
 
 ## Implemented API foundation
-- Central channel registry for Meta WhatsApp Cloud API, AWS End User Messaging and Microsoft Graph.
+- Central channel registry for Meta WhatsApp Cloud API, AWS SES outbound email, AWS End User Messaging and Microsoft Graph.
 - Per-contact, per-channel, per-purpose consent records with evidence and revocation timestamps.
 - Unified communication threads linked to CRM contacts and optional leads.
 - Message history model with provider IDs and delivery states.
@@ -27,7 +27,8 @@ All routes are under /api/v1:
 - POST /communications/drafts
 - GET /communications/inbox
 - GET /communications/inbox/{thread_id}/messages
-- POST /communications/drafts/{message_id}/approve (administrator; approval audit only)
+- PUT /communications/channels/{channel_id}/outbound (administrator; enable/disable verified outbound provider)
+- POST /communications/drafts/{message_id}/approve (administrator; validates consent and dispatches through the configured provider)
 - GET /webhooks/meta/whatsapp (Meta subscription verification)
 - POST /webhooks/meta/whatsapp (signed inbound webhook)
 
@@ -93,7 +94,42 @@ Unmatched senders and non-text media messages are stored for human handling. Med
 ### Execution model limitation
 The initial AI draft preparation uses FastAPI background tasks after webhook persistence. This is suitable as an initial integration but is not a durable queue: a process restart can interrupt processing. Before production traffic, move the processor to an SQS-backed ECS worker with retries, visibility timeout, idempotent completion, dead-letter queue and CloudWatch alarms. The API must acknowledge Meta quickly and never wait for Bedrock inference.
 
-Outbound sending remains disabled. Approving a draft records approval but does not dispatch it. A separate provider send adapter, transactional outbox, Meta 24-hour customer-service-window/template policy, delivery callbacks and audited send worker are still required. Voice is not implemented.
+## Outbound delivery
+
+Outbound dispatch is implemented for approved text messages:
+- WhatsApp uses Meta WhatsApp Cloud API Graph API v26.0 and a permanent system-user access token. Free-form text is permitted only when the latest inbound message in the same thread is less than 24 hours old. Outside that window the API rejects the send; approved template support is not implemented.
+- Email uses Amazon SES v2 in `AWS_REGION`, from `EMAIL_FROM_ADDRESS` (default `contacto@cbloft2.pt`). This avoids Microsoft Graph application permissions and Microsoft 365 tenant admin consent.
+- The approval endpoint re-checks global suppression, channel/purpose consent and expiry immediately before dispatch. It requires an enabled outbound channel, records provider IDs, sent timestamps and audit events, and marks provider failures as failed.
+- The API commits a `sending` state before calling the provider to reduce concurrent duplicate approvals. A process crash after provider acceptance but before the final database commit can still require manual reconciliation; a durable SQS outbox/worker is the next reliability improvement. Do not blindly retry messages in `sending`.
+
+### AWS and Meta configuration
+
+Inject these values from AWS Secrets Manager into the ECS API task (never commit secrets):
+- `META_WHATSAPP_ACCESS_TOKEN`: permanent Meta system-user token with `whatsapp_business_messaging`.
+- `META_WHATSAPP_PHONE_NUMBER_ID`: sender phone-number ID.
+- `META_GRAPH_API_VERSION`: defaults to `v26.0`; pin and update deliberately.
+- `EMAIL_FROM_ADDRESS=contacto@cbloft2.pt`.
+- `SES_SENDER_VERIFIED=true` only after the SES identity is verified and DKIM/SPF DNS records are published.
+
+For SES, verify `cbloft2.pt` (recommended) or the exact sender address in Amazon SES in `eu-west-1`; publish the SES DKIM records and configure a custom MAIL FROM/SPF/DMARC policy as appropriate. If the SES account is still in its sandbox, recipients must also be verified or the account must be moved to production. The application IAM task role needs `ses:SendEmail` (and no static AWS access keys).
+
+Register outbound channels as an administrator:
+```http
+POST /api/v1/communications/channels
+Content-Type: application/json
+
+{"channel":"email","provider":"aws_ses","display_name":"ThinkSmart Email","sender_identifier":"contacto@cbloft2.pt"}
+```
+For the returned channel ID, enable outbound only after SES verification:
+```http
+PUT /api/v1/communications/channels/{channel_id}/outbound
+Content-Type: application/json
+
+{"enabled":true}
+```
+For WhatsApp, register the existing Meta channel and enable outbound with the same outbound endpoint after the permanent token and phone-number ID are present. The inbound endpoint remains separately configured.
+
+Approving a pending draft now sends it through the selected provider; it is no longer an audit-only action. Delivery is synchronous in the API process in this increment; move it to an SQS transactional outbox and ECS worker with retries, DLQ, idempotent completion and status webhooks before high-volume production use. Voice is not implemented.
 
 ## Database migration
 The communications models and Alembic migration `0009_communications` are part of this PR branch. Apply and validate the migration against a disposable PostgreSQL database before deploying the API. No new database table was added for the WhatsApp webhook increment; it reuses the existing communications tables and webhook idempotency ledger.
@@ -125,4 +161,4 @@ The workspace uses a responsive three-column layout on wide screens:
 The CRM panel resolves the linked contact through the permission-scoped contacts search and then calls the matching endpoint. Unlinked/unknown senders show no CRM profile. Owner-to-property associations are explicitly labelled as CRM matches and do not verify legal ownership. The layout collapses to two columns and then one column on smaller screens.
 
 
-**Important:** approving a draft records the approval and audit event only. It does not send a WhatsApp or email message. Outbound delivery remains disabled until provider send adapters and the corresponding safeguards are implemented.
+**Important:** approving a draft triggers provider delivery only when an administrator has enabled a verified outbound channel. The approval action is an external send operation; verify the recipient, content and consent before approving.
