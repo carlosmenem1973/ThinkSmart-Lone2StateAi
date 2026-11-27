@@ -1,0 +1,77 @@
+name: Deploy ThinkSmart AI API to AWS
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production:
+        description: Type DEPLOY-PRODUCTION to deploy the production API
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-api:
+    if: github.ref == 'refs/heads/main' && inputs.confirm_production == 'DEPLOY-PRODUCTION'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: thinksmart-api-production-deploy
+      cancel-in-progress: false
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-1' }}
+      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+      ECR_REPOSITORY_NAME: ${{ vars.ECR_REPOSITORY_NAME }}
+      ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
+      ECS_API_SERVICE_NAME: ${{ vars.ECS_API_SERVICE_NAME }}
+      ECS_API_CONTAINER_NAME: ${{ vars.ECS_API_CONTAINER_NAME }}
+      IMAGE_TAG: ${{ github.sha }}-${{ github.run_number }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install deployment utilities
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes jq
+          aws --version
+          docker --version
+          jq --version
+
+      - name: Validate production configuration
+        run: |
+          set -eu
+          for name in AWS_ACCOUNT_ID AWS_ROLE_ARN ECR_REPOSITORY_NAME \
+            ECS_CLUSTER_NAME ECS_API_SERVICE_NAME ECS_API_CONTAINER_NAME; do
+            value="${!name:-}"
+            if [ -z "$value" ]; then
+              echo "Missing GitHub Environment variable: $name" >&2
+              exit 2
+            fi
+          done
+          test "$AWS_ACCOUNT_ID" = "049451987829"
+
+      - name: Configure AWS credentials using GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-api-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Verify AWS account
+        run: |
+          set -eu
+          ACTUAL_ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
+          test "$ACTUAL_ACCOUNT" = "$AWS_ACCOUNT_ID" || {
+            echo "AWS account mismatch; refusing deployment." >&2
+            exit 2
+          }
+
+      - name: Deploy API only
+        run: bash scripts/aws/deploy-ecs-api.sh
