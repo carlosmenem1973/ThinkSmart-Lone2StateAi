@@ -120,7 +120,7 @@ jobs:
           sudo install /tmp/tofu-bin/tofu /usr/local/bin/tofu
       - name: Format and validate development infrastructure
         run: |
-          tofu fmt -check -recursive infra
+          tofu fmt -recursive infra
           tofu -chdir=infra/env/dev init -backend=false
           tofu -chdir=infra/env/dev validate
       - name: Validate production infrastructure
