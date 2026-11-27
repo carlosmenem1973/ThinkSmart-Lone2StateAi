@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AnalyticsPanel from './components/AnalyticsPanel';
+import DashboardInsights from './components/DashboardInsights';
 import ContactAIPanel from './components/ContactAIPanel';
 import ContactDirectory from './components/ContactDirectory';
 import PropertySearchExperience from './components/PropertySearchExperience';
@@ -832,6 +833,7 @@ export default function App() {
               <Stat title="Seguimentos pendentes" value={dash?.pending_followups ?? '—'} icon={<CalendarClock />} />
               <Stat title="Rascunhos para rever" value={dash?.pending_drafts ?? '—'} icon={<Mail />} />
             </section>
+            <DashboardInsights dashboard={dash} aiStatus={aiStatus} aiStatusError={aiStatusError} />
             <section className="panel">
               <div className="panelhead">
                 <div><h2>Últimas oportunidades</h2><p>Oportunidades identificadas e registadas.</p></div>
