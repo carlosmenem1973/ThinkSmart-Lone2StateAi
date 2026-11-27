@@ -59,7 +59,39 @@ bash scripts/aws/merge-runtime-secrets.sh
 
 Não usar o antigo `scripts/aws/set-runtime-secrets.sh`: constrói um JSON novo e pode substituir configurações existentes. Não colocar segredos em argumentos CLI, commits, logs ou mensagens.
 
-## 4. Inventário AWS CLI — apenas leitura
+## 4. GitLab CI — rollout exclusivamente por AWS CLI
+
+O pipeline de deployment não executa `tofu apply`, não inicializa state remoto e não provisiona recursos. OpenTofu permanece apenas na fase de validação estática da infraestrutura. Os jobs `deploy_dev` e `deploy_prod` são manuais e só correm a partir de `main`.
+
+O script `scripts/aws/deploy-ecs-omnichannel.sh`:
+- valida a conta AWS e confirma, antes de qualquer escrita, que API, Worker e Beat já existem e estão ACTIVE;
+- exige Beat com exatamente uma réplica;
+- confirma que a fila SQS existente é FIFO e cifrada;
+- confirma ECR, secret, bucket S3 e distribuição CloudFront;
+- constrói frontend e imagem antes de atualizar recursos remotos;
+- faz push da imagem para o ECR existente;
+- usa `merge-runtime-secrets.sh` para atualizar apenas chaves explicitamente fornecidas, preservando todas as restantes;
+- regista novas revisões das Task Definitions existentes, preservando roles, rede, logging, volumes e comandos;
+- executa a migração Alembic uma única vez e só atualiza os três serviços se terminar com exit code zero;
+- atualiza API, Worker e Beat e publica o frontend.
+
+### Variáveis GitLab necessárias por ambiente
+
+Configurar variáveis separadas para DEV e PROD. Os valores sensíveis devem ser *masked* e *protected*; proteger também o environment `production` no GitLab.
+
+- Identidade: `AWS_ROLE_ARN_<ENV>`, `AWS_ACCOUNT_ID_<ENV>`
+- ECR: `ECR_REPOSITORY_NAME_<ENV>`
+- ECS: `ECS_CLUSTER_NAME_<ENV>`, `ECS_API_SERVICE_NAME_<ENV>`, `ECS_WORKER_SERVICE_NAME_<ENV>`, `ECS_BEAT_SERVICE_NAME_<ENV>`
+- Containers: `ECS_API_CONTAINER_NAME_<ENV>`, `ECS_WORKER_CONTAINER_NAME_<ENV>`, `ECS_BEAT_CONTAINER_NAME_<ENV>`
+- Secrets Manager: `APP_SECRET_ID_<ENV>`
+- Mensageria: `COMMUNICATIONS_SQS_QUEUE_URL_<ENV>`, `REDIS_URL_<ENV>`
+- Frontend: `FRONTEND_BUCKET_<ENV>`, `CLOUDFRONT_DISTRIBUTION_ID_<ENV>`
+
+As variáveis opcionais de Meta, SES e Microsoft Graph só são adicionadas ao secret quando têm valor não vazio. A ausência de uma variável não apaga nem limpa a chave existente.
+
+**Bloqueio intencional:** o inventário Production anterior não encontrou serviços ECS Worker/Beat, fila SQS nem Redis. Portanto, o job de deployment deve falhar no preflight sem fazer alterações até esses recursos existirem e serem confirmados. Este pipeline não os cria.
+
+## 5. Inventário AWS CLI — apenas leitura
 
 Antes de preparar Task Definitions ou serviços, recolher novamente o estado real:
 ```powershell
@@ -80,7 +112,7 @@ aws iam list-role-policies --role-name thinksmart-ecs-task-role --region eu-west
 
 Guardar os resultados de configuração em ficheiros locais protegidos; nunca guardar `SecretString` em relatórios, commits ou tickets.
 
-## 5. Infraestrutura ainda necessária
+## 6. Infraestrutura ainda necessária
 
 O inventário anterior identificou que ainda não existem filas SQS no ambiente e que o Task Role atual não apresenta permissões SQS. Também não foram identificados serviços ECS Worker/Beat nem um Redis ElastiCache. Antes de lançar o worker:
 - decidir onde ficará o Redis e confirmar conectividade privada;
@@ -93,7 +125,7 @@ O inventário anterior identificou que ainda não existem filas SQS no ambiente 
 
 Não executar `create-queue`, `put-role-policy`, `register-task-definition`, `create-service` ou `update-service` até haver plano aprovado, nomes finais, imagem e configuração de rede confirmados.
 
-## 6. Migração e rollout
+## 7. Migração e rollout
 
 A migração `alembic upgrade head` deve correr exatamente uma vez como tarefa ECS one-off, com a imagem aprovada e as mesmas configurações de rede/secret da API. Verificar exit code e `alembic current`. Se falhar, não iniciar API/Worker/Beat com o novo código.
 
@@ -109,7 +141,7 @@ A ordem final será:
 9. Testar Meta, Graph e SES com destinatários de teste.
 10. Ativar outbound apenas após aprovação legal, operacional e humana.
 
-## 7. Limites de segurança
+## 8. Limites de segurança
 
 - Nenhuma mensagem sai sem aprovação humana.
 - O worker revalida contacto ativo, `contact_permission`, `do_not_contact` e consentimento por canal/finalidade.
