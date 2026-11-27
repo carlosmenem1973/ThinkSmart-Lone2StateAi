@@ -75,7 +75,7 @@ alembic upgrade head
 alembic current
 ```
 
-Use the actual current head revision from the approved release. Do not hard-code the old `0006_property_discovery` revision; this branch includes later migrations, including `0009_communications`.
+Use the actual current head revision from the approved release. Do not hard-code the old `0006_property_discovery` revision; this branch includes later migrations, including `0009_communications` and `0010_communications_outbox`.
 
 Rollout order:
 1. Obtain green CI and approve the PR.
@@ -92,7 +92,7 @@ The GitLab pipeline sets Beat to zero during bootstrap, then to one only after r
 
 ## Delivery reliability boundary
 
-The current communications approval route still sends synchronously in the API process. This ECS split and SES IAM policy do not yet provide durable messaging delivery. A transactional outbox + SQS relay/consumer + DLQ, idempotency, ambiguous-result reconciliation, and provider delivery/read callbacks must be implemented before enabling production outbound messaging.
+The approval route commits the message and its outbox row atomically. Celery Beat schedules the outbox relay; the Worker publishes only the message ID to an encrypted SQS FIFO queue and consumes it. The queue has a DLQ with a five-receive redrive threshold. The consumer revalidates consent and channel state before delivery and marks ambiguous outcomes as `delivery_uncertain` rather than blindly retrying. Validate DLQ/redrive, duplicate delivery and failure-recovery behavior in staging before enabling production outbound messaging. Provider delivery/read callbacks are not yet persisted.
 
 A message marked `sent` currently means the provider accepted the request, not that the recipient received or read it. Never blindly retry a message left in `sending` after an ambiguous provider response.
 
