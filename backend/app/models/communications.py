@@ -86,4 +86,17 @@ class CommunicationWebhookEvent(Base):
     __table_args__ = (UniqueConstraint("provider", "event_id", name="uq_communication_provider_event"),)
 
 Index("ix_communication_threads_contact_channel", CommunicationThread.contact_id, CommunicationThread.channel)
+class CommunicationOutbox(Base):
+    """Durable DB outbox; only the message ID is sent through SQS."""
+    __tablename__ = "communication_outbox"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    message_id: Mapped[int] = mapped_column(ForeignKey("communication_messages.id", ondelete="CASCADE"), unique=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False, index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
 Index("ix_communication_messages_thread_created", CommunicationMessage.thread_id, CommunicationMessage.created_at)
