@@ -29,6 +29,18 @@ async function read<T>(response: Response): Promise<T> {
   return body as T;
 }
 
+function messageStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    pending_approval: 'A aguardar aprovação',
+    queued: 'Na fila de envio',
+    sending: 'A enviar',
+    sent: 'Aceite pelo fornecedor',
+    failed: 'Falhou',
+    delivery_uncertain: 'Entrega por confirmar',
+  };
+  return labels[status] || status.replace(/_/g, ' ');
+}
+
 function dateLabel(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('pt-PT');
@@ -113,7 +125,7 @@ export default function CommunicationsInbox({ apiFetch, role }: Props) {
     setBusy(true); setError(''); setNotice('');
     try {
       await read(await apiFetch(`/communications/drafts/${messageId}/approve`, { method: 'POST' }));
-      setNotice('Pedido de envio aceite pelo fornecedor. A confirmação de entrega ainda não está disponível.');
+      setNotice('Mensagem aprovada e colocada na fila de envio. A confirmação de entrega será apresentada quando estiver disponível.');
       await Promise.all([loadPending(), loadInbox()]);
       if (selected !== null) await loadMessages(selected);
     } catch (e) {
@@ -155,7 +167,7 @@ export default function CommunicationsInbox({ apiFetch, role }: Props) {
             {messages.map(item => <article key={item.id} className={item.direction === 'outbound' ? 'comm-message outbound' : 'comm-message inbound'}>
               <div className="comm-message-meta"><b>{item.direction === 'outbound' ? (item.status === 'sent' ? 'Mensagem aceite pelo fornecedor' : 'Resposta preparada') : 'Mensagem recebida'}</b><span>{dateLabel(item.created_at)}</span></div>
               <p>{item.body}</p>
-              <small>Estado: {item.status.replace(/_/g, ' ')}</small>
+              <small>Estado: {messageStatusLabel(item.status)}</small>
               {item.status === 'pending_approval' && admin && <button disabled={busy} onClick={() => void approve(item.id)}><CheckCircle2 size={15}/> Enviar resposta aprovada</button>}
             </article>)}
             {!messages.length && <p className="empty">Seleciona uma conversa para consultar as mensagens.</p>}
