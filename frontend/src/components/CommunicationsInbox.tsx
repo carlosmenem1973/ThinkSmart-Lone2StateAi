@@ -113,7 +113,7 @@ export default function CommunicationsInbox({ apiFetch, role }: Props) {
     setBusy(true); setError(''); setNotice('');
     try {
       await read(await apiFetch(`/communications/drafts/${messageId}/approve`, { method: 'POST' }));
-      setNotice('Aprovação registada. A mensagem não foi enviada.');
+      setNotice('Mensagem enviada pelo fornecedor de comunicação.');
       await Promise.all([loadPending(), loadInbox()]);
       if (selected !== null) await loadMessages(selected);
     } catch (e) {
@@ -156,7 +156,7 @@ export default function CommunicationsInbox({ apiFetch, role }: Props) {
               <div className="comm-message-meta"><b>{item.direction === 'outbound' ? 'Resposta preparada' : 'Mensagem recebida'}</b><span>{dateLabel(item.created_at)}</span></div>
               <p>{item.body}</p>
               <small>Estado: {item.status.replace(/_/g, ' ')}</small>
-              {item.status === 'pending_approval' && admin && <button disabled={busy} onClick={() => void approve(item.id)}><CheckCircle2 size={15}/> Aprovar resposta</button>}
+              {item.status === 'pending_approval' && admin && <button disabled={busy} onClick={() => void approve(item.id)}><CheckCircle2 size={15}/> Enviar resposta aprovada</button>}
             </article>)}
             {!messages.length && <p className="empty">Seleciona uma conversa para consultar as mensagens.</p>}
           </div>
@@ -184,7 +184,7 @@ export default function CommunicationsInbox({ apiFetch, role }: Props) {
         </> : <p className="empty">Esta conversa não está ligada a um contacto CRM identificado.</p>}
       </aside>
     </div>
-    <div className="comm-safety-note"><ShieldCheck size={15}/> A aprovação fica registada para auditoria. O envio externo continua desativado; aprovar não envia WhatsApp nem Email.</div>
+    <div className="comm-safety-note"><ShieldCheck size={15}/> A aprovação envia a mensagem pelo canal externo quando este está configurado e ativo. Confirma sempre o destinatário, conteúdo e consentimento antes de enviar.</div>
     {!admin && <p className="comm-role-note">A aprovação de respostas está reservada a administradores. Podes consultar as conversas dentro das tuas permissões.</p>}
   </section>;
 }
