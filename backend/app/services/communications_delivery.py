@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import uuid
 
 import boto3
 import httpx
@@ -140,5 +141,6 @@ def send_email_microsoft_graph(destination: str, subject: str, body: str) -> str
     except Exception as exc:
         # Do not expose access tokens, provider payloads or mailbox details.
         raise DeliveryError("microsoft_graph_send_failed", ambiguous=True) from exc
-    # Graph sendMail normally returns 202 Accepted without a message ID.
-    return f"graph-accepted-{int(__import__('time').time())}"
+    # Graph sendMail returns 202 Accepted without a provider message ID.
+    # Store a local acceptance reference; it is not a Graph message identifier.
+    return f"graph-accepted-{uuid.uuid4()}"
