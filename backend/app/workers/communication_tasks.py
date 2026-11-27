@@ -180,10 +180,14 @@ def _process_sqs_record(record: dict) -> str:
 
         purpose = str((message.metadata_json or {}).get("purpose") or "service")
         now = datetime.now(timezone.utc)
+        # Hybrid email policy: transactional messages use SES; commercial/service
+        # correspondence uses the configured Microsoft 365 mailbox.
+        email_provider = "aws_ses" if purpose == "transactional" else "microsoft_graph"
+        expected_provider = "meta_whatsapp_cloud" if thread.channel == "whatsapp" else email_provider
         channel = db.scalar(
             select(CommunicationChannel).where(
                 CommunicationChannel.channel == thread.channel,
-                CommunicationChannel.provider.in_({"meta_whatsapp_cloud"} if thread.channel == "whatsapp" else {"aws_ses", "microsoft_graph"}),
+                CommunicationChannel.provider == expected_provider,
                 CommunicationChannel.enabled.is_(True),
                 CommunicationChannel.outbound_enabled.is_(True),
             ).order_by(CommunicationChannel.id.desc())
