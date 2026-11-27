@@ -83,6 +83,32 @@ jobs:
           alembic downgrade base
           alembic upgrade head
 
+  gitlab-deploy-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install YAML parser
+        run: python -m pip install --disable-pip-version-check PyYAML
+      - name: Validate GitLab pipeline YAML and shell scripts
+        run: |
+          python - <<'PY'
+          import yaml
+          with open(".gitlab-ci.yml", encoding="utf-8") as stream:
+              config = yaml.safe_load(stream)
+          script_items = config[".deploy_environment"]["script"]
+          deploy_script = next(
+              item for item in script_items
+              if isinstance(item, str) and 'tofu -chdir="$TF_DIR" init' in item
+          )
+          with open("/tmp/gitlab-deploy.sh", "w", encoding="utf-8") as stream:
+              stream.write(deploy_script)
+          PY
+          bash -n /tmp/gitlab-deploy.sh
+          bash -n scripts/aws/set-runtime-secrets.sh
+
   infrastructure:
     runs-on: ubuntu-latest
     steps:
