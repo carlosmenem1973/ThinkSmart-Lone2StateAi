@@ -19,3 +19,6 @@ output "gitlab_ci_role_arn" { value = try(aws_iam_role.gitlab_ci[0].arn, "") }
 output "db_master_secret_arn" { value = aws_db_instance.this.master_user_secret[0].secret_arn }
 output "cloudfront_distribution_id" { value = aws_cloudfront_distribution.frontend.id }
 output "alerts_topic_arn" { value = aws_sns_topic.alerts.arn }
+
+output "communications_queue_url" { value = aws_sqs_queue.communications.url }
+output "communications_dlq_url" { value = aws_sqs_queue.communications_dlq.url }
