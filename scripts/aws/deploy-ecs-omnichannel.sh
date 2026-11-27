@@ -70,14 +70,16 @@ aws ecs describe-task-definition --task-definition "$BEAT_TASK_OLD" >/dev/null
 IMAGE_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY_NAME}:${IMAGE_TAG}"
 APP_SECRET_ARN="$(aws secretsmanager describe-secret --secret-id "$APP_SECRET_ID" --query ARN --output text)"
 
-# Update only explicitly supplied secret keys. Existing JSON keys are retained.
-export AWS_REGION APP_SECRET_ID COMMUNICATIONS_SQS_QUEUE_URL REDIS_URL
-bash scripts/aws/merge-runtime-secrets.sh
-
+# Build the frontend and backend artifacts before any remote write.
+(cd frontend && npm ci --no-audit --no-fund && npm run build)
 aws ecr get-login-password --region "$AWS_REGION" |
   docker login --username AWS --password-stdin "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 docker build --pull -f backend/Dockerfile -t "$IMAGE_URI" backend
 docker push "$IMAGE_URI"
+
+# Update only explicitly supplied secret keys. Existing JSON keys are retained.
+export AWS_REGION APP_SECRET_ID COMMUNICATIONS_SQS_QUEUE_URL REDIS_URL
+bash scripts/aws/merge-runtime-secrets.sh
 
 # Add ECS JSON-key references only for keys explicitly configured in this job.
 runtime_keys=(
@@ -160,7 +162,6 @@ aws ecs update-service --cluster "$ECS_CLUSTER_NAME" --service "$ECS_BEAT_SERVIC
 aws ecs wait services-stable --cluster "$ECS_CLUSTER_NAME" \
   --services "$ECS_API_SERVICE_NAME" "$ECS_WORKER_SERVICE_NAME" "$ECS_BEAT_SERVICE_NAME"
 
-(cd frontend && npm ci --no-audit --no-fund && npm run build)
 aws s3 sync frontend/dist "s3://${FRONTEND_BUCKET}/" --delete
 aws cloudfront create-invalidation --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
   --paths '/*' >/dev/null
