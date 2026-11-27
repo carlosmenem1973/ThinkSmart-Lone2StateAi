@@ -14,9 +14,8 @@ from app.core.auth import get_business_user, require_admin_user
 from app.core.database import get_db
 from app.models.contact import Contact
 from app.models.entities import AuditLog, User, UserRole
-from app.models.communications import CommunicationChannel, CommunicationMessage, CommunicationThread, ContactChannelConsent
+from app.models.communications import CommunicationChannel, CommunicationMessage, CommunicationThread, ContactChannelConsent, CommunicationOutbox
 from app.core.config import settings
-from app.services.communications_delivery import DeliveryError, send_email_ses, send_whatsapp_text
 
 router = APIRouter(prefix="/communications", tags=["Communications"])
 CHANNELS = {"whatsapp", "sms", "email"}
@@ -69,7 +68,7 @@ def communications_overview(user: User = Depends(get_business_user), db: Session
         raise HTTPException(status_code=403, detail="Viewer accounts cannot access communications")
     channels = db.scalars(select(CommunicationChannel).order_by(CommunicationChannel.channel)).all()
     counts = {}
-    for status in ("draft", "pending_approval", "approved", "sent", "failed"):
+    for status in ("draft", "pending_approval", "approved", "queued", "sending", "sent", "failed", "delivery_uncertain"):
         counts[status] = len(db.scalars(select(CommunicationMessage).where(CommunicationMessage.status == status).limit(500)).all())
     return {
         "account_scope": "central", "autonomy_mode": "hybrid", "voice_enabled": False,
@@ -370,45 +369,30 @@ def approve_message_draft(message_id: int, admin: User = Depends(require_admin_u
     else:
         raise HTTPException(status_code=422, detail="Outbound delivery for this channel is not implemented")
 
-    message.status = "sending"
+    # Commit approval and the outbox row atomically. SQS carries only the
+    # message ID; message content and recipient data remain in PostgreSQL.
+    message.status = "queued"
     message.approved_by = admin.id
     message.approved_at = now
-    message.metadata_json = {**(message.metadata_json or {}), "provider": channel.provider, "delivery_started": True}
+    message.metadata_json = {
+        **(message.metadata_json or {}),
+        "provider": channel.provider,
+        "delivery_started": False,
+        "delivery_queue": "sqs",
+    }
+    db.add(CommunicationOutbox(message_id=message.id, status="pending", available_at=now))
+    db.add(AuditLog(
+        actor_id=admin.id,
+        action="communications.message_queued",
+        entity_type="communication_message",
+        entity_id=str(message.id),
+        details={"channel": thread.channel, "provider": channel.provider, "queue": "sqs"},
+    ))
     db.commit()
-
-    try:
-        if thread.channel == "whatsapp":
-            provider_message_id = send_whatsapp_text(str(destination), message.body)
-        else:
-            provider_message_id = send_email_ses(
-                str(destination),
-                thread.subject or "Mensagem ThinkSmart AI",
-                message.body,
-            )
-    except DeliveryError as exc:
-        message.status = "failed"
-        message.error_code = exc.code[:100]
-        message.metadata_json = {**(message.metadata_json or {}), "delivery_started": False}
-        db.add(AuditLog(actor_id=admin.id, action="communications.message_send_failed",
-            entity_type="communication_message", entity_id=str(message.id),
-            details={"channel": thread.channel, "provider": channel.provider, "error_code": exc.code[:100]}))
-        db.commit()
-        raise HTTPException(status_code=502, detail="Provider rejected the message; the failure was recorded")
-    except Exception:
-        message.status = "failed"
-        message.error_code = "provider_unexpected_error"
-        db.add(AuditLog(actor_id=admin.id, action="communications.message_send_failed",
-            entity_type="communication_message", entity_id=str(message.id),
-            details={"channel": thread.channel, "provider": channel.provider, "error_code": "provider_unexpected_error"}))
-        db.commit()
-        raise HTTPException(status_code=502, detail="Message delivery failed; the failure was recorded")
-
-    message.status = "sent"
-    message.provider_message_id = provider_message_id
-    message.sent_at = datetime.now(timezone.utc)
-    db.add(AuditLog(actor_id=admin.id, action="communications.message_sent",
-        entity_type="communication_message", entity_id=str(message.id),
-        details={"channel": thread.channel, "provider": channel.provider, "provider_message_id": provider_message_id}))
-    db.commit()
-    return {"message_id": message.id, "status": message.status, "sent": True,
-        "provider_message_id": provider_message_id, "sent_at": message.sent_at}
+    return {
+        "message_id": message.id,
+        "status": message.status,
+        "sent": False,
+        "queued": True,
+        "note": "Approved and durably queued. Provider delivery will be processed asynchronously.",
+    }
