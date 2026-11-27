@@ -1,7 +1,7 @@
 # ThinkSmart AI — Omnichannel Communications
 
 ## Product decisions
-- One central business account owns WhatsApp, SMS and Microsoft 365 email channels.
+- One central business account owns WhatsApp and outbound email. WhatsApp uses Meta Cloud API; outbound email uses Amazon SES so it does not require Microsoft 365 tenant admin consent. Microsoft Graph remains an optional integration for mailbox access, not the outbound sender in this increment.
 - Hybrid autonomy: inbound requests can be interpreted and a response draft prepared; outbound communication remains subject to human approval.
 - Voice is out of scope for this increment.
 - Customers and property owners are represented by CRM contacts, with contact_type set to client or owner.
