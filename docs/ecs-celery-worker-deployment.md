@@ -81,9 +81,9 @@ Rollout order:
 1. Obtain green CI and approve the PR.
 2. Build/push the backend image to API and worker ECR repositories.
 3. Review the OpenTofu plan before applying.
-4. Deploy API and run the migration once.
-5. Start Worker with desired count 1 initially.
-6. Start Beat with desired count exactly 1.
+4. Register the release task definitions while API, Worker and Beat desired counts remain zero.
+5. Run `alembic upgrade head` once as a one-off ECS task and verify its exit code. The GitLab pipeline gates service startup on successful migration.
+6. Scale API and Worker to their configured counts and start Beat with desired count exactly 1.
 7. Verify CloudWatch logs and scheduled task publication.
 8. Configure SES and Meta while outbound channels remain disabled.
 9. Enable channels only after legal, operational and human approval.
