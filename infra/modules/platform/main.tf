@@ -112,11 +112,13 @@ resource "aws_security_group" "ecs" {
   name = "${local.prefix}-ecs-sg"
   description = "Only ALB can reach API tasks"
   vpc_id = aws_vpc.this.id
-  ingress { from_port = 8000
+  ingress {
+    from_port = 8000
   to_port = 8000
   protocol = "tcp"
   security_groups = [aws_security_group.alb.id, aws_security_group.alb_tls.id] }
-  egress { from_port = 0
+  egress {
+    from_port = 0
   to_port = 0
   protocol = "-1"
   cidr_blocks = ["0.0.0.0/0"] }
@@ -126,7 +128,8 @@ resource "aws_security_group" "db" {
   name = "${local.prefix}-db-sg"
   description = "PostgreSQL only from ECS"
   vpc_id = aws_vpc.this.id
-  ingress { from_port = 5432
+  ingress {
+    from_port = 5432
   to_port = 5432
   protocol = "tcp"
   security_groups = [aws_security_group.ecs.id] }
@@ -136,7 +139,8 @@ resource "aws_security_group" "redis" {
   name = "${local.prefix}-redis-sg"
   description = "Redis only from ECS"
   vpc_id = aws_vpc.this.id
-  ingress { from_port = 6379
+  ingress {
+    from_port = 6379
   to_port = 6379
   protocol = "tcp"
   security_groups = [aws_security_group.ecs.id] }
@@ -228,7 +232,8 @@ resource "aws_sqs_queue" "communications" {
 }
 resource "aws_ecs_cluster" "this" {
   name = local.prefix
-  setting { name = "containerInsights"
+  setting {
+    name = "containerInsights"
   value = "enabled" }
   tags = local.common_tags }
 resource "aws_iam_role" "execution" {
@@ -424,7 +429,8 @@ resource "aws_lb_target_group" "api" {
   protocol = "HTTP"
   vpc_id = aws_vpc.this.id
   target_type = "ip"
-  health_check { path = "/health/live"
+  health_check {
+    path = "/health/live"
   matcher = "200"
   interval = 30
   healthy_threshold = 2
@@ -435,7 +441,8 @@ resource "aws_lb_listener" "http_forward" {
   load_balancer_arn = aws_lb.this.arn
   port = 80
   protocol = "HTTP"
-  default_action { type = "forward"
+  default_action {
+    type = "forward"
     target_group_arn = aws_lb_target_group.api.arn }
 }
 resource "aws_lb_listener" "http_redirect" {
@@ -445,7 +452,8 @@ resource "aws_lb_listener" "http_redirect" {
   protocol = "HTTP"
   default_action {
     type = "redirect"
-    redirect { port = "443"
+    redirect {
+      port = "443"
     protocol = "HTTPS"
     status_code = "HTTP_301" }
   }
@@ -457,7 +465,8 @@ resource "aws_lb_listener" "https" {
   protocol = "HTTPS"
   certificate_arn = var.certificate_arn
   ssl_policy = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  default_action { type = "forward"
+  default_action {
+    type = "forward"
     target_group_arn = aws_lb_target_group.api.arn }
 }
 resource "aws_route53_record" "api_origin" {
@@ -545,10 +554,12 @@ resource "aws_ecs_service" "api" {
   deployment_minimum_healthy_percent = 50
   deployment_maximum_percent = 200
   enable_execute_command = false
-  network_configuration { subnets = aws_subnet.private[*].id
+  network_configuration {
+    subnets = aws_subnet.private[*].id
   security_groups = [aws_security_group.ecs.id]
   assign_public_ip = false }
-  load_balancer { target_group_arn = aws_lb_target_group.api.arn
+  load_balancer {
+    target_group_arn = aws_lb_target_group.api.arn
   container_name = "api"
   container_port = 8000 }
   depends_on = [aws_lb_listener.http_forward, aws_lb_listener.http_redirect, aws_lb_listener.https, aws_secretsmanager_secret_version.app_initial]
@@ -562,7 +573,8 @@ resource "aws_ecs_service" "worker" {
   desired_count = var.worker_desired_count
   launch_type = "FARGATE"
   platform_version = "LATEST"
-  network_configuration { subnets = aws_subnet.private[*].id
+  network_configuration {
+    subnets = aws_subnet.private[*].id
   security_groups = [aws_security_group.ecs.id]
   assign_public_ip = false }
   tags = local.common_tags
@@ -576,7 +588,8 @@ resource "aws_ecs_service" "beat" {
   platform_version = "LATEST"
   deployment_minimum_healthy_percent = 0
   deployment_maximum_percent = 100
-  network_configuration { subnets = aws_subnet.private[*].id
+  network_configuration {
+    subnets = aws_subnet.private[*].id
     security_groups = [aws_security_group.ecs.id]
     assign_public_ip = false
   }
@@ -673,7 +686,8 @@ resource "aws_wafv2_web_acl" "cloudfront" {
         aggregate_key_type = "IP"
       }
     }
-    visibility_config { cloudwatch_metrics_enabled = true
+    visibility_config {
+      cloudwatch_metrics_enabled = true
       metric_name = "${local.prefix}-rate-limit"
       sampled_requests_enabled = true }
   }
@@ -689,39 +703,47 @@ resource "aws_wafv2_web_acl" "cloudfront" {
         vendor_name = "AWS"
       }
     }
-    visibility_config { cloudwatch_metrics_enabled = true
+    visibility_config {
+      cloudwatch_metrics_enabled = true
       metric_name = "${local.prefix}-common"
       sampled_requests_enabled = true }
   }
   rule {
     name = "AWSManagedKnownBadInputs"
     priority = 20
-    override_action { none {} }
+    override_action {
+      none {}
+    }
     statement {
       managed_rule_group_statement {
         name = "AWSManagedRulesKnownBadInputsRuleSet"
         vendor_name = "AWS"
       }
     }
-    visibility_config { cloudwatch_metrics_enabled = true
+    visibility_config {
+      cloudwatch_metrics_enabled = true
       metric_name = "${local.prefix}-bad-inputs"
       sampled_requests_enabled = true }
   }
   rule {
     name = "AWSManagedIpReputation"
     priority = 30
-    override_action { none {} }
+    override_action {
+      none {}
+    }
     statement {
       managed_rule_group_statement {
         name = "AWSManagedRulesAmazonIpReputationList"
         vendor_name = "AWS"
       }
     }
-    visibility_config { cloudwatch_metrics_enabled = true
+    visibility_config {
+      cloudwatch_metrics_enabled = true
       metric_name = "${local.prefix}-ip-reputation"
       sampled_requests_enabled = true }
   }
-  visibility_config { cloudwatch_metrics_enabled = true
+  visibility_config {
+    cloudwatch_metrics_enabled = true
       metric_name = "${local.prefix}-waf"
       sampled_requests_enabled = true }
   tags = local.common_tags
