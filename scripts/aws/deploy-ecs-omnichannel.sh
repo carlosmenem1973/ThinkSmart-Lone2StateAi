@@ -14,6 +14,10 @@ for name in "${required[@]}"; do
     exit 2
   fi
 done
+[[ "$REDIS_URL" == rediss://* ]] || {
+  echo "REDIS_URL must use TLS (rediss://)" >&2
+  exit 2
+}
 
 command -v aws >/dev/null
 command -v jq >/dev/null
@@ -30,10 +34,15 @@ ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
 aws ecs describe-clusters --clusters "$ECS_CLUSTER_NAME" --query 'clusters[?status==`ACTIVE`].clusterArn' --output text | grep -q .
 SERVICES_JSON="$(aws ecs describe-services --cluster "$ECS_CLUSTER_NAME" \
   --services "$ECS_API_SERVICE_NAME" "$ECS_WORKER_SERVICE_NAME" "$ECS_BEAT_SERVICE_NAME" --output json)"
-printf '%s' "$SERVICES_JSON" | jq -e '
+printf '%s' "$SERVICES_JSON" | jq -e --arg api "$ECS_API_SERVICE_NAME" \
+  --arg worker "$ECS_WORKER_SERVICE_NAME" --arg beat "$ECS_BEAT_SERVICE_NAME" '
   (.failures | length) == 0 and
   (.services | length) == 3 and
-  all(.services[]; .status == "ACTIVE" and (.taskDefinition | type == "string"))
+  all(.services[]; .status == "ACTIVE" and (.taskDefinition | type == "string")) and
+  ([.services[] | select(.serviceName == $api) | .desiredCount] == [1] | not) and
+  ([.services[] | select(.serviceName == $api) | .desiredCount] | all(.[]; . >= 1)) and
+  ([.services[] | select(.serviceName == $worker) | .desiredCount] | all(.[]; . >= 1)) and
+  ([.services[] | select(.serviceName == $beat) | .desiredCount] == [1])
 ' >/dev/null || {
   echo "API, Worker and Beat ECS services must already exist and be ACTIVE. No resources will be provisioned by this pipeline." >&2
   exit 2
