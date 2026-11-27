@@ -25,6 +25,7 @@ from app.models.entities import AuditLog
 from app.services.communications_delivery import (
     DeliveryError,
     send_email_ses,
+    send_email_microsoft_graph,
     send_whatsapp_text,
 )
 from app.workers.celery_app import celery
@@ -182,9 +183,7 @@ def _process_sqs_record(record: dict) -> str:
         channel = db.scalar(
             select(CommunicationChannel).where(
                 CommunicationChannel.channel == thread.channel,
-                CommunicationChannel.provider == (
-                    "meta_whatsapp_cloud" if thread.channel == "whatsapp" else "aws_ses"
-                ),
+                CommunicationChannel.provider == "meta_whatsapp_cloud" if thread.channel == "whatsapp" else CommunicationChannel.provider.in_({"aws_ses", "microsoft_graph"}),
                 CommunicationChannel.enabled.is_(True),
                 CommunicationChannel.outbound_enabled.is_(True),
             ).order_by(CommunicationChannel.id.desc())
@@ -241,11 +240,13 @@ def _process_sqs_record(record: dict) -> str:
         try:
             if thread.channel == "whatsapp":
                 provider_message_id = send_whatsapp_text(str(destination), message.body)
-            elif thread.channel == "email":
+            elif thread.channel == "email" and channel.provider == "aws_ses":
                 provider_message_id = send_email_ses(
-                    str(destination),
-                    thread.subject or "Mensagem ThinkSmart AI",
-                    message.body,
+                    str(destination), thread.subject or "Mensagem ThinkSmart AI", message.body,
+                )
+            elif thread.channel == "email" and channel.provider == "microsoft_graph":
+                provider_message_id = send_email_microsoft_graph(
+                    str(destination), thread.subject or "Mensagem ThinkSmart AI", message.body,
                 )
             else:
                 raise DeliveryError("unsupported_outbound_channel")
