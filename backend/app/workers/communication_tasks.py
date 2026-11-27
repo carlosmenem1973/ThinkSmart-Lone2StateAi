@@ -250,19 +250,28 @@ def _process_sqs_record(record: dict) -> str:
             else:
                 raise DeliveryError("unsupported_outbound_channel")
         except DeliveryError as exc:
-            message.status = "failed"
+            final_status = "delivery_uncertain" if exc.ambiguous else "failed"
+            message.status = final_status
             message.error_code = exc.code[:100]
-            outbox.status = "failed"
+            outbox.status = "uncertain" if exc.ambiguous else "failed"
             outbox.last_error = exc.code[:100]
             db.add(AuditLog(
-                action="communications.message_send_failed",
+                action=(
+                    "communications.message_delivery_uncertain"
+                    if exc.ambiguous
+                    else "communications.message_send_failed"
+                ),
                 entity_type="communication_message",
                 entity_id=str(message.id),
-                details={"channel": thread.channel, "provider": channel.provider, "error_code": exc.code[:100]},
+                details={
+                    "channel": thread.channel,
+                    "provider": channel.provider,
+                    "error_code": exc.code[:100],
+                },
             ))
             db.commit()
             _delete_sqs_message(receipt)
-            return "failed"
+            return "uncertain" if exc.ambiguous else "failed"
         except Exception:
             message.status = "delivery_uncertain"
             message.error_code = "provider_outcome_uncertain"
