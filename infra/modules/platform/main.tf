@@ -192,6 +192,24 @@ resource "aws_cloudwatch_log_group" "worker" { name = "/ecs/${local.prefix}/work
 resource "aws_cloudwatch_log_group" "beat" { name = "/ecs/${local.prefix}/beat"
   retention_in_days = var.environment == "prod" ? 90 : 14
   tags = local.common_tags }
+resource "aws_sqs_queue" "communications_dlq" {
+  name = "${local.prefix}-communications-dlq"
+  message_retention_seconds = 1209600
+  sqs_managed_sse_enabled = true
+  tags = local.common_tags
+}
+resource "aws_sqs_queue" "communications" {
+  name = "${local.prefix}-communications"
+  visibility_timeout_seconds = 120
+  message_retention_seconds = 345600
+  receive_wait_time_seconds = 10
+  sqs_managed_sse_enabled = true
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.communications_dlq.arn
+    maxReceiveCount = 5
+  })
+  tags = local.common_tags
+}
 resource "aws_ecs_cluster" "this" { name = local.prefix
   setting { name = "containerInsights"
   value = "enabled" }
@@ -254,6 +272,23 @@ resource "aws_iam_policy" "task_bedrock" {
 resource "aws_iam_role_policy_attachment" "task_bedrock" {
   role       = aws_iam_role.task.name
   policy_arn = aws_iam_policy.task_bedrock.arn
+}
+resource "aws_iam_policy" "task_sqs_communications" {
+  name = "${local.prefix}-task-sqs-communications"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid = "ProcessCommunicationsQueue"
+      Effect = "Allow"
+      Action = ["sqs:SendMessage", "sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:ChangeMessageVisibility", "sqs:GetQueueAttributes"]
+      Resource = aws_sqs_queue.communications.arn
+    }]
+  })
+  tags = local.common_tags
+}
+resource "aws_iam_role_policy_attachment" "task_sqs_communications" {
+  role = aws_iam_role.task.name
+  policy_arn = aws_iam_policy.task_sqs_communications.arn
 }
 resource "aws_iam_policy" "task_ses_send" {
   name = "${local.prefix}-task-ses-send"
@@ -436,7 +471,7 @@ resource "aws_ecs_task_definition" "worker" {
     image = "${aws_ecr_repository.worker.repository_url}:${var.api_image_tag}"
     essential = true
     command = ["celery", "-A", "app.workers.celery_app.celery", "worker", "--loglevel=INFO", "--concurrency=2"]
-    environment = [{ name = "ENVIRONMENT", value = var.environment }, { name = "TIMEZONE", value = "Europe/Lisbon" }, { name = "BEDROCK_REGION", value = var.aws_region }, { name = "BEDROCK_MODEL_ID", value = "eu.amazon.nova-lite-v1:0" }, { name = "BEDROCK_WEB_SEARCH_ENABLED", value = "true" }, { name = "BEDROCK_WEB_SEARCH_ID", value = "web-search.v1" }]
+    environment = [{ name = "ENVIRONMENT", value = var.environment }, { name = "TIMEZONE", value = "Europe/Lisbon" }, { name = "BEDROCK_REGION", value = var.aws_region }, { name = "BEDROCK_MODEL_ID", value = "eu.amazon.nova-lite-v1:0" }, { name = "BEDROCK_WEB_SEARCH_ENABLED", value = "true" }, { name = "BEDROCK_WEB_SEARCH_ID", value = "web-search.v1" }, { name = "COMMUNICATIONS_SQS_QUEUE_URL", value = aws_sqs_queue.communications.url }]
     secrets = [
       { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" },
       { name = "REDIS_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:REDIS_URL::" },
@@ -451,7 +486,7 @@ resource "aws_ecs_task_definition" "worker" {
     ]
     logConfiguration = { logDriver = "awslogs", options = { "awslogs-group" = aws_cloudwatch_log_group.worker.name, "awslogs-region" = var.aws_region, "awslogs-stream-prefix" = "worker" } }
   }])
-  depends_on = [aws_iam_role_policy_attachment.execution, aws_iam_role_policy_attachment.task_secrets, aws_iam_role_policy_attachment.task_bedrock, aws_iam_role_policy_attachment.task_ses_send]
+  depends_on = [aws_iam_role_policy_attachment.execution, aws_iam_role_policy_attachment.task_secrets, aws_iam_role_policy_attachment.task_bedrock, aws_iam_role_policy_attachment.task_ses_send, aws_iam_role_policy_attachment.task_sqs_communications]
 }
 resource "aws_ecs_task_definition" "beat" {
   family = "${local.prefix}-beat"
