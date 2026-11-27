@@ -23,6 +23,7 @@ from app.schemas.auth import ChangePasswordRequest, CreateUserRequest, LoginRequ
 from app.schemas.leads import LeadCreate, LeadOut, LeadUpdate, FollowUpCreate
 from app.schemas.branding import BrandingUpdate
 from app.services.ai import research_web, draft_outreach, AIUnavailable, ai_available, run_specialist_agent
+from app.services.agent_matching import build_agent_matching_context
 from app.agents.registry import AGENTS
 
 router = APIRouter()
@@ -511,6 +512,26 @@ async def execute_agent(
     supplied = str(body.get("input") or body.get("query") or "").strip()
     if len(supplied) > 12000:
         raise HTTPException(status_code=413, detail="O pedido excede o limite de 12.000 caracteres.")
+
+    # Optional CRM matching context for agents that qualify leads or prepare follow-up.
+    contact_id = body.get("contact_id")
+    lead_id = body.get("lead_id")
+    if contact_id is not None or lead_id is not None:
+        if agent_id not in {"lead-qualifier", "follow-up-assistant", "owner-intelligence"}:
+            raise HTTPException(status_code=422, detail="Este agente não suporta contexto de matching CRM.")
+        try:
+            contact_id = int(contact_id) if contact_id is not None else None
+            lead_id = int(lead_id) if lead_id is not None else None
+            matching_context = build_agent_matching_context(
+                db, user, contact_id=contact_id, lead_id=lead_id
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        supplied = (supplied + "\\n\\nContexto de matching CRM (dados internos):\\n" + matching_context).strip()
+        if len(supplied) > 12000:
+            raise HTTPException(status_code=413, detail="O pedido com contexto CRM excede o limite de 12.000 caracteres.")
 
     definition = AGENTS[agent_id]
     if definition["requires_input"] and not supplied:

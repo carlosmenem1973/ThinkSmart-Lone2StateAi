@@ -14,6 +14,7 @@ module "platform" {
   worker_memory = 2048
   api_desired_count = var.api_desired_count
   worker_desired_count = var.worker_desired_count
+  beat_desired_count = var.beat_desired_count
   db_instance_class = "db.t4g.medium"
   db_multi_az = true
   db_backup_days = 14

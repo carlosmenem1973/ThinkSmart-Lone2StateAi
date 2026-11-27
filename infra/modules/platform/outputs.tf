@@ -7,6 +7,8 @@ output "worker_ecr_url" { value = aws_ecr_repository.worker.repository_url }
 output "ecs_cluster_name" { value = aws_ecs_cluster.this.name }
 output "api_service_name" { value = aws_ecs_service.api.name }
 output "worker_service_name" { value = aws_ecs_service.worker.name }
+output "beat_service_name" { value = aws_ecs_service.beat.name }
+output "beat_log_group" { value = aws_cloudwatch_log_group.beat.name }
 output "frontend_bucket" { value = aws_s3_bucket.frontend.id }
 output "cloudfront_domain" { value = aws_cloudfront_distribution.frontend.domain_name }
 output "db_endpoint" { value = aws_db_instance.this.address }
@@ -17,3 +19,8 @@ output "gitlab_ci_role_arn" { value = try(aws_iam_role.gitlab_ci[0].arn, "") }
 output "db_master_secret_arn" { value = aws_db_instance.this.master_user_secret[0].secret_arn }
 output "cloudfront_distribution_id" { value = aws_cloudfront_distribution.frontend.id }
 output "alerts_topic_arn" { value = aws_sns_topic.alerts.arn }
+
+output "communications_queue_url" { value = aws_sqs_queue.communications.url }
+output "communications_dlq_url" { value = aws_sqs_queue.communications_dlq.url }
+
+output "ecs_security_group_id" { value = aws_security_group.ecs.id }

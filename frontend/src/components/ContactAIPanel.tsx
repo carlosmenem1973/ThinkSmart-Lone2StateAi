@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import CommunicationsInbox from './CommunicationsInbox';
 import { Bot, Pause, Play, Trash2, RefreshCw, MessageCircle, ShieldCheck, Search } from 'lucide-react';
 
 type Props = { apiFetch: (path: string, init?: RequestInit) => Promise<Response>; role: string };
@@ -106,6 +107,21 @@ export default function ContactAIPanel({ apiFetch, role }: Props) {
     {!admin && <div className="auth-error">A gestão do agente está disponível apenas para administradores.</div>}
     {error && <div className="auth-error">{error}</div>}
     {message && <p className="branding-message">{message}</p>}
+    <div className="panelhead"><div><h2><Search size={18}/> Procura imobiliária automática</h2><p>Pesquisas recorrentes com AgentCore Web Search, sem contacto automático de proprietários.</p></div></div>
+    <div className="agent-input">
+      <label>Consulta de pesquisa</label>
+      <textarea rows={3} maxLength={1000} value={discovery.query} disabled={!admin || discoveryBusy} onChange={e => setDiscovery({ ...discovery, query: e.target.value })}/>
+      <label>Frequência</label>
+      <select value={discovery.interval_minutes} disabled={!admin || discoveryBusy} onChange={e => setDiscovery({ ...discovery, interval_minutes: Number(e.target.value) })}>
+        <option value={60}>A cada hora</option><option value={360}>A cada 6 horas</option><option value={720}>A cada 12 horas</option><option value={1440}>Diariamente</option><option value={10080}>Semanalmente</option>
+      </select>
+      <div className="mode-switch">
+        <button disabled={!admin || discoveryBusy || !discovery.query.trim()} onClick={() => void saveDiscovery({ enabled: !discovery.enabled })}>{discovery.enabled ? 'Desativar procura automática' : 'Ativar procura automática'}</button>
+        <button className="secondary" disabled={discoveryBusy} onClick={() => void runDiscovery()}>{discoveryBusy ? 'A pesquisar…' : 'Executar pesquisa manual agora'}</button>
+      </div>
+      <small>{discovery.enabled ? 'Procura automática ATIVA. O worker verifica pesquisas devidas a cada 5 minutos.' : 'Procura automática DESATIVADA. Só são executadas pesquisas quando alguém seleciona a opção manual.'}{discovery.last_search_at ? ` Última execução: ${new Date(discovery.last_search_at).toLocaleString('pt-PT')}.` : ''} Os resultados ficam guardados para revisão humana; não criam leads nem enviam mensagens.</small>
+    </div>
+    <CommunicationsInbox apiFetch={apiFetch} role={role} />
     {settings && <>
       <div className="stats">
         <div className="stat"><small>Estado</small><strong>{settings.paused ? 'Pausado' : settings.enabled ? 'Ativo' : 'Desativado'}</strong></div>
@@ -126,20 +142,6 @@ export default function ContactAIPanel({ apiFetch, role }: Props) {
         <button className="secondary" disabled={!admin || busy} onClick={() => { if (window.confirm('Remover a configuração do Contact AI? O histórico de conversas será preservado.')) void action('/contact-ai/configuration', 'DELETE'); }}><Trash2 size={15}/> Remover configuração</button>
       </div>
     </>}
-    <div className="panelhead"><div><h2><Search size={18}/> Procura imobiliária automática</h2><p>Pesquisas recorrentes com AgentCore Web Search, sem contacto automático de proprietários.</p></div></div>
-    <div className="agent-input">
-      <label>Consulta de pesquisa</label>
-      <textarea rows={3} maxLength={1000} value={discovery.query} disabled={!admin || discoveryBusy} onChange={e => setDiscovery({ ...discovery, query: e.target.value })}/>
-      <label>Frequência</label>
-      <select value={discovery.interval_minutes} disabled={!admin || discoveryBusy} onChange={e => setDiscovery({ ...discovery, interval_minutes: Number(e.target.value) })}>
-        <option value={60}>A cada hora</option><option value={360}>A cada 6 horas</option><option value={720}>A cada 12 horas</option><option value={1440}>Diariamente</option><option value={10080}>Semanalmente</option>
-      </select>
-      <div className="mode-switch">
-        <button disabled={!admin || discoveryBusy || !discovery.query.trim()} onClick={() => void saveDiscovery({ enabled: !discovery.enabled })}>{discovery.enabled ? 'Desativar procura automática' : 'Ativar procura automática'}</button>
-        <button className="secondary" disabled={discoveryBusy} onClick={() => void runDiscovery()}>{discoveryBusy ? 'A pesquisar…' : 'Executar pesquisa agora'}</button>
-      </div>
-      <small>{discovery.enabled ? 'Agendamento ativo. O worker verifica pesquisas devidas a cada 5 minutos.' : 'Modo manual. Ative o agendamento para pesquisas recorrentes.'} Os resultados ficam guardados para revisão humana; não criam leads nem enviam mensagens.</small>
-    </div>
     <div className="panelhead"><div><h2><MessageCircle size={18}/> Conversas recentes</h2><p>O histórico fica guardado no PostgreSQL.</p></div></div>
     <div className="tablewrap"><table><thead><tr><th>Visitante</th><th>Email</th><th>Consentimento para seguimento</th><th>Última atividade</th></tr></thead>
       <tbody>{conversations.map(c => <tr key={c.id}><td>{c.name || 'Visitante'} <small>#{c.id}</small></td><td>{c.email || 'Não fornecido'}</td><td>{c.consent_to_followup ? 'Sim' : 'Não'}</td><td>{new Date(c.last_message_at).toLocaleString('pt-PT')}</td></tr>)}

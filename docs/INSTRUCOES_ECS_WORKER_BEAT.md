@@ -1,143 +1,113 @@
 # Instruções para criar os serviços ECS Worker e Beat
 
-## 1. Objetivo e arquitetura
+## 1. Arquitetura
 
-A API FastAPI existente continua no serviço `thinksmart-api`. A execução de tarefas assíncronas e a agenda de pesquisa automática devem correr em serviços ECS Fargate separados:
+O rollout desta funcionalidade usa AWS CLI sobre recursos ECS já existentes. Os ficheiros OpenTofu permanecem para validação/referência e não são aplicados pelo pipeline GitLab. O pipeline exige três serviços Fargate previamente criados no cluster aprovado:
 
-| Serviço ECS | Processo | Desired count |
+| Serviço | Processo | Desired count |
 |---|---|---:|
-| `thinksmart-api` | API FastAPI | Manter configuração atual |
-| `thinksmart-worker` | Celery Worker | 1 inicialmente; pode escalar |
-| `thinksmart-beat` | Celery Beat | **Exatamente 1** |
+| API | FastAPI | Configuração da API |
+| Worker | Celery Worker | Variável `worker_desired_count` |
+| Beat | Celery Beat | **1, sempre** |
 
-O Worker consome tarefas da fila. O Beat publica tarefas agendadas. Não executar Beat em cada réplica do Worker: isso pode originar agendamentos duplicados. A proteção por lock na base de dados é uma salvaguarda adicional, não substitui a regra de manter um único Beat ativo.
+O Worker consome tarefas. O Beat publica tarefas agendadas. Nunca executar `celery worker --beat` no Worker e nunca escalar horizontalmente o Beat. A configuração do serviço Beat usa deployment sem sobreposição (`maximum_percent=100`) para evitar duas instâncias de scheduler durante a substituição.
 
-## 2. Pré-requisitos
+## 2. Task Definitions e imagens
 
-Antes de criar os serviços, confirmar:
+As famílias de Task Definition têm de existir antes do deployment AWS CLI:
+- `thinksmart-lone2stateai-prod-api`
+- `thinksmart-lone2stateai-prod-worker`
+- `thinksmart-lone2stateai-prod-beat`
 
-- Cluster ECS: `thinksmart-cluster`, região `eu-west-1`.
-- Imagem ECR da mesma versão imutável utilizada pela API (preferir digest SHA256, não uma tag mutável).
-- Task Role e Execution Role atuais, sem alargar permissões desnecessariamente.
-- Secrets Manager: reutilizar referências existentes, incluindo `DATABASE_URL` e `SECRET_KEY`; nunca copiar valores secretos para texto simples.
-- Configuração do broker Celery/Redis e respetivo acesso de rede.
-- Variáveis existentes para AWS Region, Bedrock e AgentCore Web Search.
-- Sub-redes privadas, Security Group e configuração de logs CloudWatch já utilizados pela API.
-- Dependências instaladas na imagem: Celery, driver PostgreSQL e dependências do projeto.
+Worker e Beat usam o mesmo repositório ECR de worker e a mesma tag imutável configurada por `api_image_tag`. Confirmar que o pipeline publica essa imagem no repositório ECR de worker antes de aplicar a infraestrutura.
 
-Não criar uma nova base de dados nem alterar Cognito, utilizadores, leads ou dados existentes para implementar estes serviços.
+Comandos definidos:
 
-## 3. Criar as Task Definitions
-
-Criar duas novas famílias a partir da Task Definition atualmente utilizada por `thinksmart-api`:
-
-- `thinksmart-worker`
-- `thinksmart-beat`
-
-Clonar a configuração funcional da API e preservar, após revisão:
-
-- `requiresCompatibilities: [FARGATE]`
-- `networkMode: awsvpc`
-- CPU e memória adequadas ao processo
-- Execution Role e Task Role
-- imagem ECR pelo mesmo digest da release da API
-- environment variables não secretas necessárias
-- referências Secrets Manager/SSM já existentes
-- configuração de rede e logging
-
-Não copiar cegamente o health check HTTP da API: os processos Worker e Beat não servem o endpoint HTTP da API. Remover esse health check ou substituí-lo por uma verificação adequada ao processo.
-
-### 3.1 Comando do Worker
-
-No container principal da Task Definition `thinksmart-worker`, configurar o comando:
-
-```json
-["celery", "-A", "app.workers.celery_app.celery", "worker", "--loglevel=INFO", "--concurrency=2"]
+```bash
+celery -A app.workers.celery_app.celery worker --loglevel=INFO --concurrency=2
+celery -A app.workers.celery_app.celery beat --loglevel=INFO
 ```
 
-Começar com concorrência 2 e uma réplica. Ajustar CPU, memória e concorrência após observar utilização, latência e backlog.
+Os processos Worker e Beat não usam o health check HTTP da API.
 
-### 3.2 Comando do Beat
+## 3. Secrets Manager
 
-No container principal da Task Definition `thinksmart-beat`, configurar:
+A infraestrutura referencia as seguintes chaves no secret JSON da aplicação:
+- `DATABASE_URL`, `REDIS_URL`, `SECRET_KEY`
+- `META_WHATSAPP_ACCESS_TOKEN`
+- `META_WHATSAPP_PHONE_NUMBER_ID`
+- `META_WHATSAPP_APP_SECRET`
+- `META_WHATSAPP_VERIFY_TOKEN`
+- `META_GRAPH_API_VERSION`
+- `EMAIL_FROM_ADDRESS`
+- `SES_SENDER_VERIFIED`
 
-```json
-["celery", "-A", "app.workers.celery_app.celery", "beat", "--loglevel=INFO"]
-```
+Preencher os valores reais no AWS Secrets Manager através de `scripts/aws/merge-runtime-secrets.sh` ou de um procedimento aprovado, nunca no repositório ou em ficheiros de task definition. O helper preserva todas as chaves que não forem explicitamente atualizadas.
 
-O serviço deve manter `desiredCount=1`. Não configurar autoscaling horizontal para Beat.
+Configuração de email prevista:
+- Remetente: `contacto@cbloft2.pt`
+- Região SES: `eu-west-1`
+- `SES_SENDER_VERIFIED=false` até a identidade estar verificada e validada.
 
-## 4. Rede e permissões
+A Task Role tem permissão `ses:SendEmail` limitada à identidade SES `cbloft2.pt`. Confirmar a identidade efetiva, DKIM e estado sandbox/produção no SES. Não substituir o registo SPF existente do Microsoft 365; consolidar os mecanismos SPF num único registo DNS.
 
-Usar as sub-redes privadas e o Security Group dos workloads atuais, ou uma regra equivalente devidamente revista.
+Configuração WhatsApp:
+- Criar/configurar a aplicação Meta e o WhatsApp Business Phone Number.
+- Guardar os tokens e segredos acima no Secrets Manager.
+- Configurar o callback HTTPS para o webhook da aplicação e o verify token correspondente.
+- Subscrever os eventos necessários no produto WhatsApp.
+- Testar primeiro com destinatários de teste autorizados e sem ativar o envio global.
 
-Os serviços precisam de:
+## 4. Redis, RDS e rede
 
-- acesso ao Redis/broker e backend Celery;
-- acesso ao RDS PostgreSQL;
-- saída HTTPS para Bedrock Runtime e AgentCore Web Search;
-- acesso a CloudWatch Logs;
-- acesso aos recursos AWS necessários através de NAT Gateway ou VPC Endpoints adequados.
+Worker e Beat usam as sub-redes privadas e o Security Group ECS. Precisam de acesso ao Redis na porta 6379, PostgreSQL na porta 5432 e saída HTTPS para Bedrock/AgentCore, Meta Graph API e AWS SES. RDS e Redis não devem ser públicos.
 
-As regras de entrada do Redis e RDS devem permitir apenas o Security Group dos serviços ECS, nas portas efetivamente configuradas. Não tornar RDS ou Redis públicos.
+## 5. Migrações
 
-Validar as permissões IAM para invocação do modelo Nova Lite e da ferramenta AgentCore Web Search. Manter o princípio do menor privilégio. Não atribuir permissões administrativas genéricas.
-
-## 5. Migração da base de dados
-
-A migração da funcionalidade de pesquisa automática deve ser executada uma única vez, como tarefa ECS pontual, usando a mesma imagem e configuração de produção:
+Executar migrações uma única vez, como tarefa ECS pontual, usando a mesma imagem e configuração da release aprovada:
 
 ```bash
 alembic upgrade head
 alembic current
 ```
 
-Confirmar que a revisão atual é `0006_property_discovery` (ou a revisão equivalente que estiver efetivamente no branch/release).
+A revisão esperada deve ser obtida da release/branch efetivamente implantada; não fixar o procedimento em `0006_property_discovery`, porque a cadeia evoluiu e inclui migrações posteriores, incluindo `0009_communications` e `0010_communications_outbox` neste PR.
 
-**Não** executar migrações em paralelo em cada réplica da API, Worker ou Beat. Fazer backup e seguir o procedimento normal de alterações de schema antes da migração de produção.
+Não executar migrações em paralelo em cada réplica da API, Worker ou Beat. Fazer backup e seguir o processo de alteração de schema antes de executar em produção.
 
-## 6. Ordem de implementação
+## 6. Ordem de rollout
 
-1. Rever e aprovar o código e os testes da release.
-2. Construir e publicar a imagem backend no ECR.
-3. Registar a Task Definition da API com a imagem aprovada e publicar a API, se necessário.
-4. Executar a migração Alembic uma única vez como tarefa pontual.
-5. Confirmar a revisão Alembic e a conectividade com RDS/Redis.
-6. Registar a Task Definition `thinksmart-worker`.
-7. Criar o serviço `thinksmart-worker` com desired count 1.
-8. Registar a Task Definition `thinksmart-beat`.
-9. Criar o serviço `thinksmart-beat` com desired count exatamente 1.
-10. Verificar logs, registo de tarefas, scheduler e execução controlada.
-11. Só depois ativar a pesquisa automática na configuração administrativa.
+1. Rever o PR e obter CI verde.
+2. Construir e publicar a imagem backend aprovada nos repositórios ECR necessários (API e worker).
+3. Confirmar por AWS CLI que cluster, serviços, SQS FIFO cifrada, Redis, ECR, secret, bucket e CloudFront já existem. O pipeline não provisiona recursos.
+4. O job GitLab manual regista revisões das Task Definitions existentes, preservando roles, rede, logging, volumes e comandos.
+5. O pipeline executa `alembic upgrade head` uma única vez como tarefa ECS pontual e valida o exit code. Se a migração falhar, não atualiza os serviços.
+6. Só após a migração bem-sucedida, atualizar API, Worker e Beat existentes; o Beat tem de manter desired count exatamente 1.
+7. Confirmar logs de arranque, registo de tarefas e publicação dos agendamentos.
+8. Configurar e testar SES e Meta com envio desativado globalmente.
+9. Só depois de validação legal, operacional e humana, ativar os canais de saída.
 
-Não ativar a pesquisa automática enquanto Worker, Beat, Redis, RDS e migração não estiverem validados.
+## 7. Estado do processamento de mensagens
 
-## 7. Logs e monitorização
+**Importante:** a aprovação grava a mensagem e o registo Outbox na mesma transação PostgreSQL. O Beat agenda o relay; o Worker publica apenas o ID da mensagem numa fila SQS FIFO cifrada e consome essa fila. A fila tem DLQ, redrive após cinco receções e alarme CloudWatch quando há mensagens visíveis na DLQ. Confirmar que o tópico SNS de alertas tem uma subscrição operacional. O consumidor revalida permissões e consentimento antes de enviar. Resultados ambíguos são marcados `delivery_uncertain` e exigem reconciliação humana; não são reenviados automaticamente.
 
-Pode reutilizar o grupo `/ecs/thinksmart-api`, desde que os stream prefixes distingam claramente `worker` e `beat`; em alternativa, criar grupos dedicados com retenção definida.
+Antes de ativar comunicações em produção, validar em staging o relay/consumer, SQS FIFO/DLQ, visibilidade, redrive, duplicação e recuperação de falhas. A persistência de callbacks de entrega/leitura Meta e eventos SES ainda está por implementar.
 
-Monitorizar:
+O estado `sent` atual significa aceitação pelo fornecedor, não confirmação de entrega ao destinatário.
 
-- Worker: arranque, tarefas recebidas, duração, falhas e retries.
-- Beat: arranque e publicação do agendamento `property-discovery-scheduler` (configurado no código para cada 300 segundos).
-- ECS: desired/running/pending count, reinícios e deployments falhados.
-- Redis: disponibilidade, ligações e tamanho da fila.
-- RDS: ligações, erros e capacidade.
-- Bedrock/AgentCore: throttling, timeouts e erros de invocação.
-
-Criar alarmes para Worker/Beat sem tarefas em execução, falhas repetidas e serviço indisponível. Garantir que só existe uma instância Beat ativa durante substituições e deployments.
-
-## 8. Teste de aceitação
+## 8. Monitorização e aceitação
 
 - [ ] Worker inicia e regista as tarefas Celery esperadas.
-- [ ] Beat inicia e publica o agendamento esperado.
+- [ ] Beat inicia e publica os agendamentos configurados.
 - [ ] Existe apenas uma instância Beat ativa.
-- [ ] Worker liga-se ao Redis e à base de dados.
-- [ ] Uma execução manual controlada cria apenas um relatório de pesquisa/auditoria.
-- [ ] Configuração desativada não invoca Bedrock.
-- [ ] Falhas ficam registadas e são observáveis.
-- [ ] Nenhuma lead é criada nem qualquer proprietário é contactado automaticamente.
+- [ ] Worker e Beat ligam-se ao Redis e RDS.
+- [ ] Logs CloudWatch distinguem API, Worker e Beat.
+- [ ] Falhas e reinícios ECS são observáveis.
+- [ ] SES identity/DKIM e acesso de envio estão verificados.
+- [ ] Webhook Meta é validado e deduplicado.
+- [ ] Canais de saída permanecem desativados até aprovação operacional.
+- [ ] Nenhuma lead é criada nem qualquer proprietário é contactado automaticamente pela pesquisa automática.
 
 ## 9. Limites de segurança
 
-A pesquisa automática recolhe e sintetiza informação pública e cria relatórios internos para revisão. Não cria leads, não envia email/SMS/WhatsApp e não realiza chamadas telefónicas. A identificação de proprietário, elegibilidade de contacto e qualquer comunicação externa exigem fluxo próprio, validação legal e aprovação humana explícita.
+A pesquisa automática recolhe e sintetiza informação pública e cria relatórios internos para revisão. Não cria leads nem contacta proprietários. Qualquer comunicação externa exige consentimento aplicável, verificação do destinatário e aprovação humana explícita.

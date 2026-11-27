@@ -3,6 +3,8 @@ output "worker_ecr_url" { value = module.platform.worker_ecr_url }
 output "ecs_cluster_name" { value = module.platform.ecs_cluster_name }
 output "api_service_name" { value = module.platform.api_service_name }
 output "worker_service_name" { value = module.platform.worker_service_name }
+output "beat_service_name" { value = module.platform.beat_service_name }
+output "beat_log_group" { value = module.platform.beat_log_group }
 output "frontend_bucket" { value = module.platform.frontend_bucket }
 output "cloudfront_domain" { value = module.platform.cloudfront_domain }
 output "db_endpoint" { value = module.platform.db_endpoint }
@@ -13,3 +15,8 @@ output "gitlab_ci_role_arn" { value = try(module.platform.gitlab_ci_role_arn, ""
 output "db_master_secret_arn" { value = module.platform.db_master_secret_arn }
 output "cloudfront_distribution_id" { value = module.platform.cloudfront_distribution_id }
 output "alerts_topic_arn" { value = module.platform.alerts_topic_arn }
+
+output "communications_queue_url" { value = module.platform.communications_queue_url }
+output "communications_dlq_url" { value = module.platform.communications_dlq_url }
+
+output "ecs_security_group_id" { value = module.platform.ecs_security_group_id }

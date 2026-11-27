@@ -15,8 +15,10 @@ resource "aws_vpc" "this" {
   enable_dns_hostnames = true
   tags = merge(local.common_tags, { Name = "${local.prefix}-vpc" })
 }
-resource "aws_internet_gateway" "this" { vpc_id = aws_vpc.this.id
-  tags = local.common_tags }
+resource "aws_internet_gateway" "this" {
+  vpc_id = aws_vpc.this.id
+  tags = local.common_tags
+}
 resource "aws_subnet" "public" {
   count = var.az_count
   vpc_id = aws_vpc.this.id
@@ -33,10 +35,12 @@ resource "aws_subnet" "private" {
   map_public_ip_on_launch = false
   tags = merge(local.common_tags, { Name = "${local.prefix}-private-${count.index + 1}", Tier = "private" })
 }
-resource "aws_eip" "nat" { count = var.single_nat_gateway ? 1 : var.az_count
+resource "aws_eip" "nat" {
+  count = var.single_nat_gateway ? 1 : var.az_count
   domain = "vpc"
   depends_on = [aws_internet_gateway.this]
-  tags = local.common_tags }
+  tags = local.common_tags
+}
 resource "aws_nat_gateway" "this" {
   count = var.single_nat_gateway ? 1 : var.az_count
   allocation_id = aws_eip.nat[count.index].id
@@ -44,26 +48,36 @@ resource "aws_nat_gateway" "this" {
   depends_on = [aws_internet_gateway.this]
   tags = merge(local.common_tags, { Name = "${local.prefix}-nat-${count.index + 1}" })
 }
-resource "aws_route_table" "public" { vpc_id = aws_vpc.this.id
-  tags = merge(local.common_tags, { Name = "${local.prefix}-public-rt" }) }
-resource "aws_route" "public_internet" { route_table_id = aws_route_table.public.id
-  destination_cidr_block = "0.0.0.0/0"
-  gateway_id = aws_internet_gateway.this.id }
-resource "aws_route_table_association" "public" { count = var.az_count
-  subnet_id = aws_subnet.public[count.index].id
-  route_table_id = aws_route_table.public.id }
-resource "aws_route_table" "private" { count = var.az_count
+resource "aws_route_table" "public" {
   vpc_id = aws_vpc.this.id
-  tags = merge(local.common_tags, { Name = "${local.prefix}-private-rt-${count.index + 1}" }) }
+  tags = merge(local.common_tags, { Name = "${local.prefix}-public-rt" })
+}
+resource "aws_route" "public_internet" {
+  route_table_id = aws_route_table.public.id
+  destination_cidr_block = "0.0.0.0/0"
+  gateway_id = aws_internet_gateway.this.id
+}
+resource "aws_route_table_association" "public" {
+  count = var.az_count
+  subnet_id = aws_subnet.public[count.index].id
+  route_table_id = aws_route_table.public.id
+}
+resource "aws_route_table" "private" {
+  count = var.az_count
+  vpc_id = aws_vpc.this.id
+  tags = merge(local.common_tags, { Name = "${local.prefix}-private-rt-${count.index + 1}" })
+}
 resource "aws_route" "private_nat" {
   count = var.az_count
   route_table_id = aws_route_table.private[count.index].id
   destination_cidr_block = "0.0.0.0/0"
   nat_gateway_id = aws_nat_gateway.this[var.single_nat_gateway ? 0 : count.index].id
 }
-resource "aws_route_table_association" "private" { count = var.az_count
+resource "aws_route_table_association" "private" {
+  count = var.az_count
   subnet_id = aws_subnet.private[count.index].id
-  route_table_id = aws_route_table.private[count.index].id }
+  route_table_id = aws_route_table.private[count.index].id
+}
 
 resource "aws_security_group" "alb" {
   name = "${local.prefix}-alb-sg"
@@ -105,34 +119,42 @@ resource "aws_security_group" "ecs" {
   name = "${local.prefix}-ecs-sg"
   description = "Only ALB can reach API tasks"
   vpc_id = aws_vpc.this.id
-  ingress { from_port = 8000
+  ingress {
+    from_port = 8000
   to_port = 8000
   protocol = "tcp"
-  security_groups = [aws_security_group.alb.id, aws_security_group.alb_tls.id] }
-  egress { from_port = 0
+  security_groups = [aws_security_group.alb.id, aws_security_group.alb_tls.id]
+  }
+  egress {
+    from_port = 0
   to_port = 0
   protocol = "-1"
-  cidr_blocks = ["0.0.0.0/0"] }
+  cidr_blocks = ["0.0.0.0/0"]
+  }
   tags = local.common_tags
 }
 resource "aws_security_group" "db" {
   name = "${local.prefix}-db-sg"
   description = "PostgreSQL only from ECS"
   vpc_id = aws_vpc.this.id
-  ingress { from_port = 5432
+  ingress {
+    from_port = 5432
   to_port = 5432
   protocol = "tcp"
-  security_groups = [aws_security_group.ecs.id] }
+  security_groups = [aws_security_group.ecs.id]
+  }
   tags = local.common_tags
 }
 resource "aws_security_group" "redis" {
   name = "${local.prefix}-redis-sg"
   description = "Redis only from ECS"
   vpc_id = aws_vpc.this.id
-  ingress { from_port = 6379
+  ingress {
+    from_port = 6379
   to_port = 6379
   protocol = "tcp"
-  security_groups = [aws_security_group.ecs.id] }
+  security_groups = [aws_security_group.ecs.id]
+  }
   tags = local.common_tags
 }
 
@@ -173,33 +195,74 @@ resource "aws_iam_role_policy" "gitlab_iam_limited" {
   })
 }
 
-resource "aws_ecr_repository" "api" { name = "${local.prefix}/api"
+resource "aws_ecr_repository" "api" {
+  name = "${local.prefix}/api"
   image_tag_mutability = "IMMUTABLE"
   image_scanning_configuration { scan_on_push = true }
   encryption_configuration { encryption_type = "AES256" }
-  tags = local.common_tags }
-resource "aws_ecr_repository" "worker" { name = "${local.prefix}/worker"
+  tags = local.common_tags
+}
+resource "aws_ecr_repository" "worker" {
+  name = "${local.prefix}/worker"
   image_tag_mutability = "IMMUTABLE"
   image_scanning_configuration { scan_on_push = true }
   encryption_configuration { encryption_type = "AES256" }
-  tags = local.common_tags }
-resource "aws_cloudwatch_log_group" "api" { name = "/ecs/${local.prefix}/api"
+  tags = local.common_tags
+}
+resource "aws_cloudwatch_log_group" "api" {
+  name = "/ecs/${local.prefix}/api"
   retention_in_days = var.environment == "prod" ? 90 : 14
-  tags = local.common_tags }
-resource "aws_cloudwatch_log_group" "worker" { name = "/ecs/${local.prefix}/worker"
+  tags = local.common_tags
+}
+resource "aws_cloudwatch_log_group" "worker" {
+  name = "/ecs/${local.prefix}/worker"
   retention_in_days = var.environment == "prod" ? 90 : 14
-  tags = local.common_tags }
-resource "aws_ecs_cluster" "this" { name = local.prefix
-  setting { name = "containerInsights"
-  value = "enabled" }
-  tags = local.common_tags }
+  tags = local.common_tags
+}
+resource "aws_cloudwatch_log_group" "beat" {
+  name = "/ecs/${local.prefix}/beat"
+  retention_in_days = var.environment == "prod" ? 90 : 14
+  tags = local.common_tags
+}
+resource "aws_sqs_queue" "communications_dlq" {
+  name = "${local.prefix}-communications-dlq.fifo"
+  fifo_queue = true
+  content_based_deduplication = true
+  message_retention_seconds = 1209600
+  sqs_managed_sse_enabled = true
+  tags = local.common_tags
+}
+resource "aws_sqs_queue" "communications" {
+  name = "${local.prefix}-communications.fifo"
+  fifo_queue = true
+  content_based_deduplication = true
+  visibility_timeout_seconds = 120
+  message_retention_seconds = 345600
+  receive_wait_time_seconds = 10
+  sqs_managed_sse_enabled = true
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.communications_dlq.arn
+    maxReceiveCount = 5
+  })
+  tags = local.common_tags
+}
+resource "aws_ecs_cluster" "this" {
+  name = local.prefix
+  setting {
+    name = "containerInsights"
+  value = "enabled"
+  }
+  tags = local.common_tags
+}
 resource "aws_iam_role" "execution" {
   name = "${local.prefix}-ecs-execution"
   assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "ecs-tasks.amazonaws.com" }, Action = "sts:AssumeRole" }] })
   tags = local.common_tags
 }
-resource "aws_iam_role_policy_attachment" "execution" { role = aws_iam_role.execution.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy" }
+resource "aws_iam_role_policy_attachment" "execution" {
+  role = aws_iam_role.execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
 resource "aws_iam_role" "task" {
   name = "${local.prefix}-ecs-task"
   assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "ecs-tasks.amazonaws.com" }, Action = "sts:AssumeRole" }] })
@@ -252,17 +315,55 @@ resource "aws_iam_role_policy_attachment" "task_bedrock" {
   role       = aws_iam_role.task.name
   policy_arn = aws_iam_policy.task_bedrock.arn
 }
+resource "aws_iam_policy" "task_sqs_communications" {
+  name = "${local.prefix}-task-sqs-communications"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid = "ProcessCommunicationsQueue"
+      Effect = "Allow"
+      Action = ["sqs:SendMessage", "sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:ChangeMessageVisibility", "sqs:GetQueueAttributes"]
+      Resource = aws_sqs_queue.communications.arn
+    }]
+  })
+  tags = local.common_tags
+}
+resource "aws_iam_role_policy_attachment" "task_sqs_communications" {
+  role = aws_iam_role.task.name
+  policy_arn = aws_iam_policy.task_sqs_communications.arn
+}
+resource "aws_iam_policy" "task_ses_send" {
+  name = "${local.prefix}-task-ses-send"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid = "SendFromThinkSmartVerifiedIdentity"
+      Effect = "Allow"
+      Action = ["ses:SendEmail"]
+      Resource = "arn:aws:ses:${var.aws_region}:${data.aws_caller_identity.current.account_id}:identity/cbloft2.pt"
+    }]
+  })
+  tags = local.common_tags
+}
+resource "aws_iam_role_policy_attachment" "task_ses_send" {
+  role = aws_iam_role.task.name
+  policy_arn = aws_iam_policy.task_ses_send.arn
+}
 resource "aws_iam_policy" "task_secrets" {
   name = "${local.prefix}-task-secrets"
   policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = ["secretsmanager:GetSecretValue"], Resource = [aws_secretsmanager_secret.app.arn] }, { Effect = "Allow", Action = ["kms:Decrypt"], Resource = ["*"] , Condition = { StringEquals = { "kms:ViaService" = "secretsmanager.${var.aws_region}.amazonaws.com" } } }] })
 }
-resource "aws_iam_role_policy_attachment" "task_secrets" { role = aws_iam_role.execution.name
-  policy_arn = aws_iam_policy.task_secrets.arn }
+resource "aws_iam_role_policy_attachment" "task_secrets" {
+  role = aws_iam_role.execution.name
+  policy_arn = aws_iam_policy.task_secrets.arn
+}
 
-resource "aws_secretsmanager_secret" "app" { name = "${local.prefix}/application"
+resource "aws_secretsmanager_secret" "app" {
+  name = "${local.prefix}/application"
   description = "Populate JSON keys after infrastructure deployment"
   recovery_window_in_days = var.environment == "prod" ? 30 : 7
-  tags = local.common_tags }
+  tags = local.common_tags
+}
 resource "aws_secretsmanager_secret_version" "app_initial" {
   secret_id = aws_secretsmanager_secret.app.id
   secret_string = jsonencode({
@@ -275,12 +376,21 @@ resource "aws_secretsmanager_secret_version" "app_initial" {
     MICROSOFT_CLIENT_SECRET = "REPLACE_ME"
     MICROSOFT_TENANT_ID = "REPLACE_ME"
     MICROSOFT_REDIRECT_URI = "https://REPLACE_ME/api/v1/integrations/microsoft/callback"
+    META_WHATSAPP_ACCESS_TOKEN = ""
+    META_WHATSAPP_PHONE_NUMBER_ID = ""
+    META_WHATSAPP_APP_SECRET = ""
+    META_WHATSAPP_VERIFY_TOKEN = ""
+    META_GRAPH_API_VERSION = "v26.0"
+    EMAIL_FROM_ADDRESS = "contacto@cbloft2.pt"
+    SES_SENDER_VERIFIED = "false"
   })
   lifecycle { ignore_changes = [secret_string] }
 }
-resource "aws_db_subnet_group" "this" { name = local.prefix
+resource "aws_db_subnet_group" "this" {
+  name = local.prefix
   subnet_ids = aws_subnet.private[*].id
-  tags = local.common_tags }
+  tags = local.common_tags
+}
 resource "aws_db_instance" "this" {
   identifier = local.prefix
   engine = "postgres"
@@ -305,8 +415,10 @@ resource "aws_db_instance" "this" {
   enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
   tags = local.common_tags
 }
-resource "aws_elasticache_subnet_group" "this" { name = local.prefix
-  subnet_ids = aws_subnet.private[*].id }
+resource "aws_elasticache_subnet_group" "this" {
+  name = local.prefix
+  subnet_ids = aws_subnet.private[*].id
+}
 resource "aws_elasticache_replication_group" "this" {
   replication_group_id = local.prefix
   description = "EstateAI ${var.environment} Redis"
@@ -326,31 +438,39 @@ resource "aws_elasticache_replication_group" "this" {
   tags = local.common_tags
 }
 
-resource "aws_lb" "this" { name = substr(local.prefix, 0, 32)
+resource "aws_lb" "this" {
+  name = substr(local.prefix, 0, 32)
   load_balancer_type = "application"
   internal = false
   subnets = aws_subnet.public[*].id
   security_groups = [aws_security_group.alb.id, aws_security_group.alb_tls.id]
   enable_deletion_protection = var.environment == "prod"
-  tags = local.common_tags }
-resource "aws_lb_target_group" "api" { name = substr("${local.prefix}-api", 0, 32)
+  tags = local.common_tags
+}
+resource "aws_lb_target_group" "api" {
+  name = substr("${local.prefix}-api", 0, 32)
   port = 8000
   protocol = "HTTP"
   vpc_id = aws_vpc.this.id
   target_type = "ip"
-  health_check { path = "/health/live"
+  health_check {
+    path = "/health/live"
   matcher = "200"
   interval = 30
   healthy_threshold = 2
-  unhealthy_threshold = 3 }
-  tags = local.common_tags }
+  unhealthy_threshold = 3
+  }
+  tags = local.common_tags
+}
 resource "aws_lb_listener" "http_forward" {
   count = var.certificate_arn == "" ? 1 : 0
   load_balancer_arn = aws_lb.this.arn
   port = 80
   protocol = "HTTP"
-  default_action { type = "forward"
-    target_group_arn = aws_lb_target_group.api.arn }
+  default_action {
+    type = "forward"
+    target_group_arn = aws_lb_target_group.api.arn
+    }
 }
 resource "aws_lb_listener" "http_redirect" {
   count = var.certificate_arn == "" ? 0 : 1
@@ -359,9 +479,11 @@ resource "aws_lb_listener" "http_redirect" {
   protocol = "HTTP"
   default_action {
     type = "redirect"
-    redirect { port = "443"
+    redirect {
+      port = "443"
     protocol = "HTTPS"
-    status_code = "HTTP_301" }
+    status_code = "HTTP_301"
+    }
   }
 }
 resource "aws_lb_listener" "https" {
@@ -371,8 +493,10 @@ resource "aws_lb_listener" "https" {
   protocol = "HTTPS"
   certificate_arn = var.certificate_arn
   ssl_policy = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  default_action { type = "forward"
-    target_group_arn = aws_lb_target_group.api.arn }
+  default_action {
+    type = "forward"
+    target_group_arn = aws_lb_target_group.api.arn
+    }
 }
 resource "aws_route53_record" "api_origin" {
   count = var.route53_zone_id != "" && var.api_origin_domain_name != "" ? 1 : 0
@@ -393,7 +517,7 @@ resource "aws_ecs_task_definition" "api" {
   memory = var.api_memory
   execution_role_arn = aws_iam_role.execution.arn
   task_role_arn = aws_iam_role.task.arn
-  container_definitions = jsonencode([{ name = "api", image = "${aws_ecr_repository.api.repository_url}:${var.api_image_tag}", essential = true, portMappings = [{ containerPort = 8000, protocol = "tcp" }], environment = [{ name = "APP_NAME", value = "ThinkSmart-Lone2StateAi" }, { name = "ENVIRONMENT", value = var.environment }, { name = "TIMEZONE", value = "Europe/Lisbon" }, { name = "BEDROCK_REGION", value = var.aws_region }, { name = "BEDROCK_MODEL_ID", value = "eu.amazon.nova-lite-v1:0" }, { name = "BEDROCK_WEB_SEARCH_ENABLED", value = "true" }, { name = "BEDROCK_WEB_SEARCH_ID", value = "web-search.v1" }, { name = "COOKIE_SECURE", value = "true" }, { name = "FRONTEND_ORIGIN", value = var.frontend_domain_name == "" ? "https://${aws_cloudfront_distribution.frontend.domain_name}" : "https://${var.frontend_domain_name}" }], secrets = [{ name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" }, { name = "REDIS_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:REDIS_URL::" }, { name = "SECRET_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SECRET_KEY::" }, { name = "BOOTSTRAP_ADMIN_EMAIL", valueFrom = "${aws_secretsmanager_secret.app.arn}:BOOTSTRAP_ADMIN_EMAIL::" }, { name = "BOOTSTRAP_ADMIN_PASSWORD", valueFrom = "${aws_secretsmanager_secret.app.arn}:BOOTSTRAP_ADMIN_PASSWORD::" }, { name = "MICROSOFT_CLIENT_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:MICROSOFT_CLIENT_ID::" }, { name = "MICROSOFT_CLIENT_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:MICROSOFT_CLIENT_SECRET::" }, { name = "MICROSOFT_TENANT_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:MICROSOFT_TENANT_ID::" }, { name = "MICROSOFT_REDIRECT_URI", valueFrom = "${aws_secretsmanager_secret.app.arn}:MICROSOFT_REDIRECT_URI::" }, { name = "GOOGLE_MAPS_API_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:GOOGLE_MAPS_API_KEY::" }], logConfiguration = { logDriver = "awslogs", options = { "awslogs-group" = aws_cloudwatch_log_group.api.name, "awslogs-region" = var.aws_region, "awslogs-stream-prefix" = "api" } } }])
+  container_definitions = jsonencode([{ name = "api", image = "${aws_ecr_repository.api.repository_url}:${var.api_image_tag}", essential = true, portMappings = [{ containerPort = 8000, protocol = "tcp" }], environment = [{ name = "APP_NAME", value = "ThinkSmart-Lone2StateAi" }, { name = "ENVIRONMENT", value = var.environment }, { name = "TIMEZONE", value = "Europe/Lisbon" }, { name = "AWS_REGION", value = var.aws_region }, { name = "BEDROCK_REGION", value = var.aws_region }, { name = "BEDROCK_MODEL_ID", value = "eu.amazon.nova-lite-v1:0" }, { name = "BEDROCK_WEB_SEARCH_ENABLED", value = "true" }, { name = "BEDROCK_WEB_SEARCH_ID", value = "web-search.v1" }, { name = "COOKIE_SECURE", value = "true" }, { name = "FRONTEND_ORIGIN", value = var.frontend_domain_name == "" ? "https://${aws_cloudfront_distribution.frontend.domain_name}" : "https://${var.frontend_domain_name}" }], secrets = [{ name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" }, { name = "REDIS_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:REDIS_URL::" }, { name = "SECRET_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SECRET_KEY::" }, { name = "BOOTSTRAP_ADMIN_EMAIL", valueFrom = "${aws_secretsmanager_secret.app.arn}:BOOTSTRAP_ADMIN_EMAIL::" }, { name = "BOOTSTRAP_ADMIN_PASSWORD", valueFrom = "${aws_secretsmanager_secret.app.arn}:BOOTSTRAP_ADMIN_PASSWORD::" }, { name = "MICROSOFT_CLIENT_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:MICROSOFT_CLIENT_ID::" }, { name = "MICROSOFT_CLIENT_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:MICROSOFT_CLIENT_SECRET::" }, { name = "MICROSOFT_TENANT_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:MICROSOFT_TENANT_ID::" }, { name = "MICROSOFT_REDIRECT_URI", valueFrom = "${aws_secretsmanager_secret.app.arn}:MICROSOFT_REDIRECT_URI::" }, { name = "GOOGLE_MAPS_API_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:GOOGLE_MAPS_API_KEY::" }, { name = "META_WHATSAPP_ACCESS_TOKEN", valueFrom = "${aws_secretsmanager_secret.app.arn}:META_WHATSAPP_ACCESS_TOKEN::" }, { name = "META_WHATSAPP_PHONE_NUMBER_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:META_WHATSAPP_PHONE_NUMBER_ID::" }, { name = "META_WHATSAPP_APP_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:META_WHATSAPP_APP_SECRET::" }, { name = "META_WHATSAPP_VERIFY_TOKEN", valueFrom = "${aws_secretsmanager_secret.app.arn}:META_WHATSAPP_VERIFY_TOKEN::" }, { name = "META_GRAPH_API_VERSION", valueFrom = "${aws_secretsmanager_secret.app.arn}:META_GRAPH_API_VERSION::" }, { name = "EMAIL_FROM_ADDRESS", valueFrom = "${aws_secretsmanager_secret.app.arn}:EMAIL_FROM_ADDRESS::" }, { name = "SES_SENDER_VERIFIED", valueFrom = "${aws_secretsmanager_secret.app.arn}:SES_SENDER_VERIFIED::" }], logConfiguration = { logDriver = "awslogs", options = { "awslogs-group" = aws_cloudwatch_log_group.api.name, "awslogs-region" = var.aws_region, "awslogs-stream-prefix" = "api" } } }])
   depends_on = [aws_iam_role_policy_attachment.execution, aws_iam_role_policy_attachment.task_secrets, aws_iam_role_policy_attachment.task_bedrock]
 }
 resource "aws_ecs_task_definition" "worker" {
@@ -404,7 +528,49 @@ resource "aws_ecs_task_definition" "worker" {
   memory = var.worker_memory
   execution_role_arn = aws_iam_role.execution.arn
   task_role_arn = aws_iam_role.task.arn
-  container_definitions = jsonencode([{ name = "worker", image = "${aws_ecr_repository.worker.repository_url}:${var.api_image_tag}", essential = true, command = ["sh", "-c", "until alembic current 2>/dev/null | grep -q '(head)'; do sleep 3; done; exec celery -A app.workers.celery_app.celery worker --beat --loglevel=INFO"], environment = [{ name = "ENVIRONMENT", value = var.environment }, { name = "TIMEZONE", value = "Europe/Lisbon" }, { name = "BEDROCK_REGION", value = var.aws_region }, { name = "BEDROCK_MODEL_ID", value = "eu.amazon.nova-lite-v1:0" }, { name = "BEDROCK_WEB_SEARCH_ENABLED", value = "true" }, { name = "BEDROCK_WEB_SEARCH_ID", value = "web-search.v1" }], secrets = [{ name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" }, { name = "REDIS_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:REDIS_URL::" }, { name = "SECRET_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SECRET_KEY::" }], logConfiguration = { logDriver = "awslogs", options = { "awslogs-group" = aws_cloudwatch_log_group.worker.name, "awslogs-region" = var.aws_region, "awslogs-stream-prefix" = "worker" } } }])
+  container_definitions = jsonencode([{
+    name = "worker"
+    image = "${aws_ecr_repository.worker.repository_url}:${var.api_image_tag}"
+    essential = true
+    command = ["celery", "-A", "app.workers.celery_app.celery", "worker", "--loglevel=INFO", "--concurrency=2"]
+    environment = [{ name = "ENVIRONMENT", value = var.environment }, { name = "TIMEZONE", value = "Europe/Lisbon" }, { name = "AWS_REGION", value = var.aws_region }, { name = "BEDROCK_REGION", value = var.aws_region }, { name = "BEDROCK_MODEL_ID", value = "eu.amazon.nova-lite-v1:0" }, { name = "BEDROCK_WEB_SEARCH_ENABLED", value = "true" }, { name = "BEDROCK_WEB_SEARCH_ID", value = "web-search.v1" }, { name = "COMMUNICATIONS_SQS_QUEUE_URL", value = aws_sqs_queue.communications.url }]
+    secrets = [
+      { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" },
+      { name = "REDIS_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:REDIS_URL::" },
+      { name = "SECRET_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SECRET_KEY::" },
+      { name = "META_WHATSAPP_ACCESS_TOKEN", valueFrom = "${aws_secretsmanager_secret.app.arn}:META_WHATSAPP_ACCESS_TOKEN::" },
+      { name = "META_WHATSAPP_PHONE_NUMBER_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:META_WHATSAPP_PHONE_NUMBER_ID::" },
+      { name = "META_WHATSAPP_APP_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:META_WHATSAPP_APP_SECRET::" },
+      { name = "META_WHATSAPP_VERIFY_TOKEN", valueFrom = "${aws_secretsmanager_secret.app.arn}:META_WHATSAPP_VERIFY_TOKEN::" },
+      { name = "META_GRAPH_API_VERSION", valueFrom = "${aws_secretsmanager_secret.app.arn}:META_GRAPH_API_VERSION::" },
+      { name = "EMAIL_FROM_ADDRESS", valueFrom = "${aws_secretsmanager_secret.app.arn}:EMAIL_FROM_ADDRESS::" },
+      { name = "SES_SENDER_VERIFIED", valueFrom = "${aws_secretsmanager_secret.app.arn}:SES_SENDER_VERIFIED::" }
+    ]
+    logConfiguration = { logDriver = "awslogs", options = { "awslogs-group" = aws_cloudwatch_log_group.worker.name, "awslogs-region" = var.aws_region, "awslogs-stream-prefix" = "worker" } }
+  }])
+  depends_on = [aws_iam_role_policy_attachment.execution, aws_iam_role_policy_attachment.task_secrets, aws_iam_role_policy_attachment.task_bedrock, aws_iam_role_policy_attachment.task_ses_send, aws_iam_role_policy_attachment.task_sqs_communications]
+}
+resource "aws_ecs_task_definition" "beat" {
+  family = "${local.prefix}-beat"
+  requires_compatibilities = ["FARGATE"]
+  network_mode = "awsvpc"
+  cpu = 256
+  memory = 512
+  execution_role_arn = aws_iam_role.execution.arn
+  task_role_arn = aws_iam_role.task.arn
+  container_definitions = jsonencode([{
+    name = "beat"
+    image = "${aws_ecr_repository.worker.repository_url}:${var.api_image_tag}"
+    essential = true
+    command = ["celery", "-A", "app.workers.celery_app.celery", "beat", "--loglevel=INFO"]
+    environment = [{ name = "ENVIRONMENT", value = var.environment }, { name = "TIMEZONE", value = "Europe/Lisbon" }, { name = "AWS_REGION", value = var.aws_region }, { name = "BEDROCK_REGION", value = var.aws_region }, { name = "BEDROCK_MODEL_ID", value = "eu.amazon.nova-lite-v1:0" }, { name = "BEDROCK_WEB_SEARCH_ENABLED", value = "true" }, { name = "BEDROCK_WEB_SEARCH_ID", value = "web-search.v1" }]
+    secrets = [
+      { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" },
+      { name = "REDIS_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:REDIS_URL::" },
+      { name = "SECRET_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SECRET_KEY::" }
+    ]
+    logConfiguration = { logDriver = "awslogs", options = { "awslogs-group" = aws_cloudwatch_log_group.beat.name, "awslogs-region" = var.aws_region, "awslogs-stream-prefix" = "beat" } }
+  }])
   depends_on = [aws_iam_role_policy_attachment.execution, aws_iam_role_policy_attachment.task_secrets, aws_iam_role_policy_attachment.task_bedrock]
 }
 resource "aws_ecs_service" "api" {
@@ -417,12 +583,16 @@ resource "aws_ecs_service" "api" {
   deployment_minimum_healthy_percent = 50
   deployment_maximum_percent = 200
   enable_execute_command = false
-  network_configuration { subnets = aws_subnet.private[*].id
+  network_configuration {
+    subnets = aws_subnet.private[*].id
   security_groups = [aws_security_group.ecs.id]
-  assign_public_ip = false }
-  load_balancer { target_group_arn = aws_lb_target_group.api.arn
+  assign_public_ip = false
+  }
+  load_balancer {
+    target_group_arn = aws_lb_target_group.api.arn
   container_name = "api"
-  container_port = 8000 }
+  container_port = 8000
+  }
   depends_on = [aws_lb_listener.http_forward, aws_lb_listener.http_redirect, aws_lb_listener.https, aws_secretsmanager_secret_version.app_initial]
   
   tags = local.common_tags
@@ -434,14 +604,45 @@ resource "aws_ecs_service" "worker" {
   desired_count = var.worker_desired_count
   launch_type = "FARGATE"
   platform_version = "LATEST"
-  network_configuration { subnets = aws_subnet.private[*].id
+  network_configuration {
+    subnets = aws_subnet.private[*].id
   security_groups = [aws_security_group.ecs.id]
-  assign_public_ip = false }
-  
+  assign_public_ip = false
+  }
+  tags = local.common_tags
+}
+resource "aws_ecs_service" "beat" {
+  name = "beat"
+  cluster = aws_ecs_cluster.this.id
+  task_definition = aws_ecs_task_definition.beat.arn
+  desired_count = var.beat_desired_count
+  launch_type = "FARGATE"
+  platform_version = "LATEST"
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent = 100
+  network_configuration {
+    subnets = aws_subnet.private[*].id
+    security_groups = [aws_security_group.ecs.id]
+    assign_public_ip = false
+  }
   tags = local.common_tags
 }
 resource "aws_sns_topic" "alerts" {
   name = "${local.prefix}-alerts"
+  tags = local.common_tags
+}
+resource "aws_cloudwatch_metric_alarm" "communications_dlq_visible" {
+  alarm_name = "${local.prefix}-communications-dlq-visible"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods = 1
+  metric_name = "ApproximateNumberOfMessagesVisible"
+  namespace = "AWS/SQS"
+  period = 60
+  statistic = "Maximum"
+  threshold = 1
+  dimensions = { QueueName = aws_sqs_queue.communications_dlq.name }
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  treat_missing_data = "notBreaching"
   tags = local.common_tags
 }
 resource "aws_cloudwatch_metric_alarm" "api_cpu" {
@@ -487,70 +688,118 @@ resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
   tags = local.common_tags
 }
 
-resource "aws_s3_bucket" "frontend" { bucket = "${local.prefix}-${data.aws_caller_identity.current.account_id}-frontend"
+resource "aws_s3_bucket" "frontend" {
+  bucket = "${local.prefix}-${data.aws_caller_identity.current.account_id}-frontend"
   force_destroy = var.environment != "prod"
-  tags = local.common_tags }
-resource "aws_s3_bucket_public_access_block" "frontend" { bucket = aws_s3_bucket.frontend.id
+  tags = local.common_tags
+}
+resource "aws_s3_bucket_public_access_block" "frontend" {
+  bucket = aws_s3_bucket.frontend.id
   block_public_acls = true
   block_public_policy = true
   ignore_public_acls = true
-  restrict_public_buckets = true }
-resource "aws_s3_bucket_server_side_encryption_configuration" "frontend" { bucket = aws_s3_bucket.frontend.id
-  rule { apply_server_side_encryption_by_default { sse_algorithm = "AES256" } } }
-resource "aws_cloudfront_origin_access_control" "frontend" { name = "${local.prefix}-oac"
+  restrict_public_buckets = true
+}
+resource "aws_s3_bucket_server_side_encryption_configuration" "frontend" {
+  bucket = aws_s3_bucket.frontend.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+resource "aws_cloudfront_origin_access_control" "frontend" {
+  name = "${local.prefix}-oac"
   description = "Private S3 origin"
   origin_access_control_origin_type = "s3"
   signing_behavior = "always"
-  signing_protocol = "sigv4" }
+  signing_protocol = "sigv4"
+}
 resource "aws_wafv2_web_acl" "cloudfront" {
   provider = aws.use1
   name = "${local.prefix}-cloudfront-waf"
   description = "AWS managed baseline protections for EstateAI CloudFront"
   scope = "CLOUDFRONT"
-  default_action { allow {} }
+  default_action {
+    allow {}
+  }
   rule {
     name = "RateLimitPerIp"
     priority = 1
-    action { block {} }
-    statement { rate_based_statement { limit = 1500
-      aggregate_key_type = "IP" } }
-    visibility_config { cloudwatch_metrics_enabled = true
+    action {
+      block {}
+    }
+    statement {
+      rate_based_statement {
+        limit = 1500
+        aggregate_key_type = "IP"
+      }
+    }
+    visibility_config {
+      cloudwatch_metrics_enabled = true
       metric_name = "${local.prefix}-rate-limit"
-      sampled_requests_enabled = true }
+      sampled_requests_enabled = true
+    }
   }
   rule {
     name = "AWSManagedCommonRuleSet"
     priority = 10
-    override_action { none {} }
-    statement { managed_rule_group_statement { name = "AWSManagedRulesCommonRuleSet"
-      vendor_name = "AWS" } }
-    visibility_config { cloudwatch_metrics_enabled = true
+    override_action {
+      none {}
+    }
+    statement {
+      managed_rule_group_statement {
+        name = "AWSManagedRulesCommonRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+    visibility_config {
+      cloudwatch_metrics_enabled = true
       metric_name = "${local.prefix}-common"
-      sampled_requests_enabled = true }
+      sampled_requests_enabled = true
+    }
   }
   rule {
     name = "AWSManagedKnownBadInputs"
     priority = 20
-    override_action { none {} }
-    statement { managed_rule_group_statement { name = "AWSManagedRulesKnownBadInputsRuleSet"
-      vendor_name = "AWS" } }
-    visibility_config { cloudwatch_metrics_enabled = true
+    override_action {
+      none {}
+    }
+    statement {
+      managed_rule_group_statement {
+        name = "AWSManagedRulesKnownBadInputsRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+    visibility_config {
+      cloudwatch_metrics_enabled = true
       metric_name = "${local.prefix}-bad-inputs"
-      sampled_requests_enabled = true }
+      sampled_requests_enabled = true
+    }
   }
   rule {
     name = "AWSManagedIpReputation"
     priority = 30
-    override_action { none {} }
-    statement { managed_rule_group_statement { name = "AWSManagedRulesAmazonIpReputationList"
-      vendor_name = "AWS" } }
-    visibility_config { cloudwatch_metrics_enabled = true
+    override_action {
+      none {}
+    }
+    statement {
+      managed_rule_group_statement {
+        name = "AWSManagedRulesAmazonIpReputationList"
+        vendor_name = "AWS"
+      }
+    }
+    visibility_config {
+      cloudwatch_metrics_enabled = true
       metric_name = "${local.prefix}-ip-reputation"
-      sampled_requests_enabled = true }
+      sampled_requests_enabled = true
+    }
   }
-  visibility_config { cloudwatch_metrics_enabled = true
+  visibility_config {
+    cloudwatch_metrics_enabled = true
       metric_name = "${local.prefix}-waf"
-      sampled_requests_enabled = true }
+      sampled_requests_enabled = true
+    }
   tags = local.common_tags
 }
 
@@ -618,7 +867,11 @@ resource "aws_cloudfront_distribution" "frontend" {
     }
   }
 
-  restrictions { geo_restriction { restriction_type = "none" } }
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
   viewer_certificate { cloudfront_default_certificate = true }
   tags = local.common_tags
 }

@@ -1,76 +1,109 @@
 # ECS deployment: ThinkSmart Celery worker and Beat
 
-## Purpose
+## Topology
 
-The API container does not execute Celery Beat. Automated property discovery requires a running Celery worker **and exactly one Beat scheduler**. Run these as separate ECS services in the existing `thinksmart-cluster`, using the same immutable ECR image as the API.
+The GitLab rollout uses AWS CLI against pre-existing ECS resources. OpenTofu files remain for infrastructure validation/reference and are not applied by the deployment pipeline. The pipeline expects these three Fargate services to exist in the approved cluster:
 
-- `thinksmart-worker`: Celery worker; desired count may be 1 or more.
-- `thinksmart-beat`: Celery Beat; desired count must remain **1**.
-- `thinksmart-api`: FastAPI; unchanged.
+| Service | Process | Desired count |
+|---|---|---:|
+| API | FastAPI | Existing API setting |
+| Worker | Celery Worker | `worker_desired_count` |
+| Beat | Celery Beat | Exactly 1 when enabled |
 
-Do not run Beat in every worker replica. The task code uses a PostgreSQL row lock to reduce duplicate scheduled runs, but a single Beat remains the intended topology.
+Worker consumes tasks; Beat publishes periodic tasks. Never run `celery worker --beat` in the worker service and never horizontally scale Beat. The Beat ECS service uses a non-overlapping deployment (`maximum_percent=100`) to prevent two active schedulers during replacement.
 
-## Required task configuration
+## Task definitions
 
-Create two task-definition families from the current production API task definition. Preserve the existing:
-- Fargate launch type and `awsvpc` network mode
-- execution role and task role
-- Secrets Manager references (DATABASE_URL and any existing required secrets)
-- environment variables, including Redis URL, AWS region, Bedrock model/profile and AgentCore Web Search settings
-- CloudWatch log group `/ecs/thinksmart-api` (use distinct stream prefixes such as `worker` and `beat`)
-- CPU/memory and private subnet/security-group configuration appropriate to the workload
+The following task-definition families/services must be provisioned before the AWS CLI deployment job can run:
+- `thinksmart-lone2stateai-prod-api`
+- `thinksmart-lone2stateai-prod-worker`
+- `thinksmart-lone2stateai-prod-beat`
 
-Use the exact same ECR image digest as the API release. Do not copy credentials into task-definition environment literals.
+API, Worker and Beat task definitions are updated to the same immutable image URI in the existing ECR repository. The pipeline does not create ECR repositories, ECS services, queues, Redis or IAM policies.
 
-### Container command overrides
+Worker command:
 
-For the worker task, override the container command to:
-
-```json
-["celery", "-A", "app.workers.celery_app.celery", "worker", "--loglevel=INFO", "--concurrency=2"]
+```bash
+celery -A app.workers.celery_app.celery worker --loglevel=INFO --concurrency=2
 ```
 
-For the Beat task, override the container command to:
+Beat command:
 
-```json
-["celery", "-A", "app.workers.celery_app.celery", "beat", "--loglevel=INFO"]
+```bash
+celery -A app.workers.celery_app.celery beat --loglevel=INFO
 ```
 
-Keep the API container health check only on the API task. Worker and Beat should use ECS container health checks appropriate to the process or rely on ECS task health plus CloudWatch alarms; do not use the API HTTP health check against these commands.
+Do not apply a HTTP health check to Worker or Beat.
 
-## Networking
+## Runtime secrets and outbound provider configuration
 
-Both services need outbound connectivity to:
-- the existing Redis broker/backend
-- the existing RDS PostgreSQL database
-- AWS Bedrock Runtime and Bedrock AgentCore Web Search endpoints
+The application Secrets Manager JSON contains the Meta and SES settings used by the API and Worker:
+- `META_WHATSAPP_ACCESS_TOKEN`
+- `META_WHATSAPP_PHONE_NUMBER_ID`
+- `META_WHATSAPP_APP_SECRET`
+- `META_WHATSAPP_VERIFY_TOKEN`
+- `META_GRAPH_API_VERSION`
+- `EMAIL_FROM_ADDRESS`
+- `SES_SENDER_VERIFIED`
 
-Use the existing VPC private subnets and security group pattern. Ensure Redis and RDS security groups allow inbound traffic from the ECS task security group on their respective ports. Provide NAT or suitable VPC endpoints for AWS service access. Do not make RDS or Redis publicly accessible.
+GitLab deployment variables populate only explicitly supplied keys through `scripts/aws/merge-runtime-secrets.sh`. Existing JSON keys are preserved. The older `set-runtime-secrets.sh` is not used by the pipeline because it replaces the complete JSON document.
 
-## Rollout sequence
+SES:
+- Sender: `contacto@cbloft2.pt`
+- Region: `eu-west-1`
+- IAM Task Role policy grants `ses:SendEmail` only for the `cbloft2.pt` SES identity.
+- Set `SES_SENDER_VERIFIED=true` only after verifying the SES identity and DKIM. Check whether SES is in sandbox and request production access if required.
+- Preserve the existing Microsoft 365 SPF configuration. Publish one consolidated SPF record; do not add a second SPF TXT record.
 
-1. Build and push the new backend image to ECR.
-2. Register the API task definition using that image and deploy the API service.
-3. Run the Alembic upgrade as a one-off ECS task using the same image and production environment/secrets:
-   `alembic upgrade head`
-4. Verify `alembic current` reports `0006_property_discovery`.
-5. Register worker and Beat task definitions with the same image digest and required environment/secrets.
-6. Create/update `thinksmart-worker` with desired count 1.
-7. Create/update `thinksmart-beat` with desired count exactly 1.
-8. Check CloudWatch logs for task registration and successful scheduler ticks.
-9. Only then enable automatic discovery in the Contact AI admin panel.
+Meta:
+- Configure the WhatsApp Business number and Meta app.
+- Configure the webhook URL and verify token, and subscribe to required WhatsApp webhook events.
+- Test with approved test recipients before enabling outbound delivery.
 
-Do not run the migration concurrently from every API replica. Run it once as a controlled one-off task before enabling the new worker.
+The infrastructure does not verify SES DNS or Meta ownership; these are external operational prerequisites.
 
-## Operational checks
+## Network and IAM
 
-- Worker logs should show task execution for `app.workers.contact_ai_tasks.run_scheduled_property_discovery`.
-- Beat logs should show the `property-discovery-scheduler` entry every 300 seconds.
-- A disabled configuration should return without making a Bedrock request.
-- Discovery reports are written to the existing `audit_logs` table and require human review.
-- Set CloudWatch alarms for worker/Beat task count zero, repeated task failures, and ECS deployment failures.
-- Keep Beat at one active task. If replacing it, stop the old task before allowing the replacement to become the active scheduler.
+Worker and Beat run in private subnets using the ECS task security group. They require Redis TCP 6379, PostgreSQL TCP 5432 and outbound HTTPS to Bedrock/AgentCore, Meta Graph API and AWS SES. RDS and Redis remain private.
 
-## Safety boundary
+## Migrations and rollout
 
-This scheduler performs web research and stores reports. It does not create CRM leads, send email/SMS/WhatsApp, or call property owners. Owner contact requires a separate, consent-aware and legally reviewed workflow with explicit human approval.
+Run Alembic exactly once as a controlled one-off ECS task with the approved release image:
+
+```bash
+alembic upgrade head
+alembic current
+```
+
+Use the actual current head revision from the approved release. Do not hard-code the old `0006_property_discovery` revision; this branch includes later migrations, including `0009_communications` and `0010_communications_outbox`.
+
+Rollout order:
+1. Obtain green CI and approve the PR.
+2. Confirm by AWS CLI that the existing ECS cluster, API/Worker/Beat services, encrypted SQS FIFO queue, Redis, ECR, Secrets Manager secret, S3 bucket and CloudFront distribution are present.
+3. Trigger the manual GitLab AWS CLI deployment job. It performs a read-only preflight before any remote writes and fails closed if a required resource is missing.
+4. The pipeline builds the artifacts, pushes one immutable image, merges only explicitly configured secret keys, and registers new revisions of the existing task definitions.
+5. Run `alembic upgrade head` once as a one-off ECS task and verify its exit code. The pipeline does not update any service if migration fails.
+6. Update the three existing ECS services and wait for them to stabilize; Beat must remain at desired count exactly 1.
+7. Verify CloudWatch logs and scheduled task publication.
+8. Configure SES and Meta while outbound channels remain disabled.
+9. Enable channels only after legal, operational and human approval.
+
+The GitLab deployment jobs are manual and run only from `main`. They do not bootstrap or provision infrastructure. The preflight requires Beat to be already running with desired count exactly 1.
+
+## Delivery reliability boundary
+
+The approval route commits the message and its outbox row atomically. Celery Beat schedules the outbox relay; the Worker publishes only the message ID to an encrypted SQS FIFO queue and consumes it. The queue has a DLQ with a five-receive redrive threshold and a CloudWatch alarm when visible DLQ messages exist. Ensure the SNS alerts topic has an operational subscription. The consumer revalidates consent and channel state before delivery and marks ambiguous outcomes as `delivery_uncertain` rather than blindly retrying. Validate DLQ/redrive, duplicate delivery and failure-recovery behavior in staging before enabling production outbound messaging. Provider delivery/read callbacks are not yet persisted.
+
+A message marked `sent` currently means the provider accepted the request, not that the recipient received or read it. Never blindly retry a message left in `sending` after an ambiguous provider response.
+
+## Acceptance checklist
+
+- [ ] Worker starts and registers expected Celery tasks.
+- [ ] Beat starts and publishes scheduled entries.
+- [ ] Exactly one Beat task is active.
+- [ ] Worker and Beat connect to Redis and PostgreSQL.
+- [ ] API, Worker and Beat logs are separated in CloudWatch.
+- [ ] SES identity/DKIM and send permission are verified.
+- [ ] Meta webhook verification and deduplication are tested.
+- [ ] Outbound channels remain disabled until explicit operational approval.
+- [ ] Automated property discovery does not create CRM leads or contact owners.

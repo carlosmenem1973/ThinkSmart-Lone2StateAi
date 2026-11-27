@@ -2,10 +2,11 @@ name: Validate ThinkSmart PR
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feature/omnichannel-communications-foundation]
   push:
     branches:
       - fix/pr5-voice-property-discovery-conflicts
+      - feature/omnichannel-communications-foundation
 
 permissions:
   contents: read
@@ -33,6 +34,99 @@ jobs:
         run: python -m compileall -q app migrations
       - name: Validate Alembic revision chain
         run: alembic history
+
+  migration-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: thinksmart_test
+          POSTGRES_USER: thinksmart
+          POSTGRES_PASSWORD: thinksmart_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U thinksmart -d thinksmart_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: postgresql+psycopg://thinksmart:thinksmart_test@localhost:5432/thinksmart_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Upgrade fresh PostgreSQL database to head
+        run: alembic upgrade head
+      - name: Verify database reached expected revision
+        run: |
+          python - <<'PY'
+          from sqlalchemy import create_engine, text
+          from app.core.config import settings
+          engine = create_engine(settings.database_url)
+          with engine.connect() as connection:
+              revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+          assert revision == "0010_communications_outbox", revision
+          print(f"Database migration reached {revision}")
+          PY
+      - name: Verify downgrade and re-upgrade
+        run: |
+          alembic downgrade base
+          alembic upgrade head
+
+  gitlab-deploy-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install YAML parser
+        run: python -m pip install --disable-pip-version-check PyYAML
+      - name: Validate GitLab pipeline YAML and AWS CLI deployment scripts
+        run: |
+          python - <<'PY'
+          import yaml
+          with open(".gitlab-ci.yml", encoding="utf-8") as stream:
+              config = yaml.safe_load(stream)
+          deploy_script = "\n".join(config[".deploy_environment"]["script"])
+          assert "scripts/aws/deploy-ecs-omnichannel.sh" in deploy_script
+          assert "tofu apply" not in deploy_script
+          assert "set-runtime-secrets.sh" not in deploy_script
+          with open("/tmp/gitlab-deploy.sh", "w", encoding="utf-8") as stream:
+              stream.write(deploy_script)
+          PY
+          bash -n /tmp/gitlab-deploy.sh
+          bash -n scripts/aws/merge-runtime-secrets.sh
+          bash -n scripts/aws/deploy-ecs-omnichannel.sh
+
+  infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OpenTofu
+        run: |
+          curl -fsSLo /tmp/tofu.zip "https://github.com/opentofu/opentofu/releases/download/v1.10.6/tofu_1.10.6_linux_amd64.zip"
+          unzip -o /tmp/tofu.zip -d /tmp/tofu-bin
+          sudo install /tmp/tofu-bin/tofu /usr/local/bin/tofu
+      - name: Format and validate development infrastructure
+        run: |
+          tofu fmt -recursive infra
+          tofu -chdir=infra/env/dev init -backend=false
+          tofu -chdir=infra/env/dev validate
+      - name: Validate production infrastructure
+        run: |
+          tofu -chdir=infra/env/prod init -backend=false
+          tofu -chdir=infra/env/prod validate
 
   frontend:
     runs-on: ubuntu-latest

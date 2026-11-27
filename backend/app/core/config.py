@@ -29,6 +29,7 @@ class Settings(BaseSettings):
 
     # AWS
     aws_region: str = "eu-west-1"
+    communications_sqs_queue_url: str = ""
 
     # Amazon Bedrock - Nova Lite
     bedrock_region: str = "eu-west-1"
@@ -47,10 +48,23 @@ class Settings(BaseSettings):
     cognito_app_client_id: str = ""
     frontend_origin: str = "http://localhost:5173"
 
+    # Meta WhatsApp Cloud API webhook (secrets must come from AWS Secrets Manager)
+    meta_whatsapp_verify_token: str = ""
+    meta_whatsapp_app_secret: str = ""
+    meta_whatsapp_phone_number_id: str = ""
+    meta_whatsapp_access_token: str = ""
+    meta_graph_api_version: str = "v26.0"
+
+    # Outbound email via Amazon SES (no Microsoft 365 tenant admin consent required)
+    email_from_address: str = "contacto@cbloft2.pt"
+    ses_sender_verified: bool = False
+
     # Microsoft 365 integration
     microsoft_tenant_id: str = "common"
     microsoft_client_id: str = ""
     microsoft_client_secret: str = ""
+    # App-only Microsoft Graph sender; requires tenant-specific Mail.Send application permission.
+    microsoft_graph_sender: str = ""
     microsoft_redirect_uri: str = (
         "https://estateai.example.pt/api/v1/integrations/microsoft/callback"
     )
