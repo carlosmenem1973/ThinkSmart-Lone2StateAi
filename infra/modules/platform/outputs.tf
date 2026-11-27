@@ -22,3 +22,5 @@ output "alerts_topic_arn" { value = aws_sns_topic.alerts.arn }
 
 output "communications_queue_url" { value = aws_sqs_queue.communications.url }
 output "communications_dlq_url" { value = aws_sqs_queue.communications_dlq.url }
+
+output "ecs_security_group_id" { value = aws_security_group.ecs.id }
