@@ -29,6 +29,7 @@ class Settings(BaseSettings):
 
     # AWS
     aws_region: str = "eu-west-1"
+    communications_sqs_queue_url: str = ""
 
     # Amazon Bedrock - Nova Lite
     bedrock_region: str = "eu-west-1"
