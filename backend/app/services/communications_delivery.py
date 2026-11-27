@@ -10,8 +10,9 @@ from app.core.config import settings
 
 
 class DeliveryError(Exception):
-    def __init__(self, code: str):
+    def __init__(self, code: str, ambiguous: bool = False):
         self.code = code
+        self.ambiguous = ambiguous
         super().__init__(code)
 
 
@@ -54,13 +55,13 @@ def send_whatsapp_text(destination: str, body: str) -> str:
             code = f"meta_{error.get('code', exc.response.status_code)}"
         except Exception:
             code = f"meta_http_{exc.response.status_code}"
-        raise DeliveryError(code) from exc
+        raise DeliveryError(code, ambiguous=exc.response.status_code >= 500) from exc
     except (httpx.HTTPError, ValueError) as exc:
-        raise DeliveryError("meta_transport_or_response_error") from exc
+        raise DeliveryError("meta_transport_or_response_error", ambiguous=True) from exc
     messages = data.get("messages") or []
     provider_id = messages[0].get("id") if messages else None
     if not provider_id:
-        raise DeliveryError("meta_missing_message_id")
+        raise DeliveryError("meta_missing_message_id", ambiguous=True)
     return str(provider_id)
 
 
@@ -83,9 +84,9 @@ def send_email_ses(destination: str, subject: str, body: str) -> str:
     except Exception as exc:
         # Do not expose provider response bodies, credentials or recipient data.
         response = getattr(exc, "response", {}) or {}
-        error = (response.get("Error") or {}).get("Code") or "ses_send_failed"
-        raise DeliveryError(f"ses_{str(error)[:80]}") from exc
+        error = (response.get("Error") or {}).get("Code")
+        raise DeliveryError(f"ses_{str(error or 'send_failed')[:80]}", ambiguous=not bool(error)) from exc
     message_id = response.get("MessageId")
     if not message_id:
-        raise DeliveryError("ses_missing_message_id")
+        raise DeliveryError("ses_missing_message_id", ambiguous=True)
     return str(message_id)
