@@ -315,7 +315,7 @@ def consume_sqs_messages():
         return {"status": "queue_not_configured", "processed": 0}
     response = _sqs_client().receive_message(
         QueueUrl=settings.communications_sqs_queue_url,
-        MaxNumberOfMessages=10,
+        MaxNumberOfMessages=1,
         WaitTimeSeconds=0,
         VisibilityTimeout=120,
     )
