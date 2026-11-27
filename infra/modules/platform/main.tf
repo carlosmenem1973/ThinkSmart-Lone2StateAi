@@ -250,7 +250,8 @@ resource "aws_ecs_cluster" "this" {
   name = local.prefix
   setting {
     name = "containerInsights"
-  value = "enabled" }
+  value = "enabled"
+  }
   tags = local.common_tags
 }
 resource "aws_iam_role" "execution" {
