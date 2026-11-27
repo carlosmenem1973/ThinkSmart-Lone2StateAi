@@ -35,6 +35,54 @@ jobs:
       - name: Validate Alembic revision chain
         run: alembic history
 
+  migration-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: thinksmart_test
+          POSTGRES_USER: thinksmart
+          POSTGRES_PASSWORD: thinksmart_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U thinksmart -d thinksmart_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: postgresql+psycopg://thinksmart:thinksmart_test@localhost:5432/thinksmart_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Upgrade fresh PostgreSQL database to head
+        run: alembic upgrade head
+      - name: Verify database reached expected revision
+        run: |
+          python - <<'PY'
+          from sqlalchemy import create_engine, text
+          from app.core.config import settings
+          engine = create_engine(settings.database_url)
+          with engine.connect() as connection:
+              revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+          assert revision == "0009_communications", revision
+          print(f"Database migration reached {revision}")
+          PY
+      - name: Verify downgrade and re-upgrade
+        run: |
+          alembic downgrade base
+          alembic upgrade head
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
