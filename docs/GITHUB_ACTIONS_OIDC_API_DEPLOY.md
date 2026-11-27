@@ -167,7 +167,7 @@ This policy allows pushing an image to the existing API ECR repository, register
 }
 ```
 
-No permission is granted to create or modify IAM roles, policies, OIDC providers, ECS clusters/services, networking, RDS, ElastiCache, SQS, Secrets Manager values, S3, or CloudFront. ECS `DescribeTaskDefinition` requires `Resource: "*"` in the current service authorization model; all write actions remain scoped to the API task-definition family, API service, and target cluster. ECR `BatchGetImage` is included because Docker image push requires it per AWS documentation.
+No permission is granted to create or modify IAM roles, policies, OIDC providers, ECS clusters, networking, RDS, ElastiCache, SQS, Secrets Manager values, S3, or CloudFront. The role can update only the existing `thinksmart-api` service; it cannot create or delete ECS services. ECS `DescribeTaskDefinition` requires `Resource: "*"` in the current service authorization model; all ECS write actions remain scoped to the API task-definition family, API service, and target cluster. ECR `BatchGetImage` is included because Docker image push requires it per AWS documentation.
 
 ## Deployment behavior
 
