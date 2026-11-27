@@ -65,18 +65,20 @@ def publish_pending_outbox():
                     QueueUrl=queue_url,
                     MessageBody=json.dumps({"message_id": message_id}),
                 )
-                row.status = "published"
-                row.published_at = now
-                row.attempts += 1
-                row.last_error = None
-                db.commit()
-                published += 1
             except Exception as exc:
                 row.attempts += 1
                 row.last_error = type(exc).__name__[:100]
                 row.available_at = now + timedelta(seconds=min(300, 2 ** min(row.attempts, 8)))
                 db.commit()
                 break
+            # If this commit fails after SQS accepted the event, the row remains
+            # pending and may be published again. The consumer deduplicates by DB state.
+            row.status = "published"
+            row.published_at = now
+            row.attempts += 1
+            row.last_error = None
+            db.commit()
+            published += 1
         finally:
             db.close()
     return {"status": "completed", "published": published}
