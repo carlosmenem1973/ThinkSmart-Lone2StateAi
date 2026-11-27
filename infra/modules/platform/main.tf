@@ -631,6 +631,20 @@ resource "aws_sns_topic" "alerts" {
   name = "${local.prefix}-alerts"
   tags = local.common_tags
 }
+resource "aws_cloudwatch_metric_alarm" "communications_dlq_visible" {
+  alarm_name = "${local.prefix}-communications-dlq-visible"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods = 1
+  metric_name = "ApproximateNumberOfMessagesVisible"
+  namespace = "AWS/SQS"
+  period = 60
+  statistic = "Maximum"
+  threshold = 1
+  dimensions = { QueueName = aws_sqs_queue.communications_dlq.name }
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  treat_missing_data = "notBreaching"
+  tags = local.common_tags
+}
 resource "aws_cloudwatch_metric_alarm" "api_cpu" {
   alarm_name = "${local.prefix}-api-cpu-high"
   comparison_operator = "GreaterThanThreshold"
