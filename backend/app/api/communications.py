@@ -48,6 +48,14 @@ def _can_access_contact(user: User, contact: Contact):
     if contact.assigned_to != user.id and contact.created_by != user.id:
         raise HTTPException(status_code=404, detail="Contact not found")
 
+def _can_access_thread(user: User, thread: CommunicationThread) -> None:
+    """Enforce communications visibility consistently for thread content."""
+    if user.role == UserRole.VIEWER:
+        raise HTTPException(status_code=403, detail="Viewer accounts cannot access communications")
+    if user.role == UserRole.SELLER and thread.assigned_to != user.id:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+
 def _consent_for(db: Session, contact_id: int, channel: str, purpose: str):
     return db.scalar(select(ContactChannelConsent).where(
         ContactChannelConsent.contact_id == contact_id,
@@ -272,8 +280,7 @@ def list_thread_messages(thread_id: int, user: User = Depends(get_business_user)
     thread = db.get(CommunicationThread, thread_id)
     if not thread:
         raise HTTPException(status_code=404, detail="Thread not found")
-    if user.role == UserRole.SELLER and thread.assigned_to != user.id:
-        raise HTTPException(status_code=404, detail="Thread not found")
+    _can_access_thread(user, thread)
     rows = db.scalars(select(CommunicationMessage).where(CommunicationMessage.thread_id == thread_id)
         .order_by(CommunicationMessage.created_at)).all()
     return [{"id": m.id, "direction": m.direction, "actor_type": m.actor_type, "body": m.body,
