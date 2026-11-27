@@ -15,7 +15,8 @@ resource "aws_vpc" "this" {
   enable_dns_hostnames = true
   tags = merge(local.common_tags, { Name = "${local.prefix}-vpc" })
 }
-resource "aws_internet_gateway" "this" { vpc_id = aws_vpc.this.id
+resource "aws_internet_gateway" "this" {
+  vpc_id = aws_vpc.this.id
   tags = local.common_tags }
 resource "aws_subnet" "public" {
   count = var.az_count
@@ -33,7 +34,8 @@ resource "aws_subnet" "private" {
   map_public_ip_on_launch = false
   tags = merge(local.common_tags, { Name = "${local.prefix}-private-${count.index + 1}", Tier = "private" })
 }
-resource "aws_eip" "nat" { count = var.single_nat_gateway ? 1 : var.az_count
+resource "aws_eip" "nat" {
+  count = var.single_nat_gateway ? 1 : var.az_count
   domain = "vpc"
   depends_on = [aws_internet_gateway.this]
   tags = local.common_tags }
@@ -44,15 +46,19 @@ resource "aws_nat_gateway" "this" {
   depends_on = [aws_internet_gateway.this]
   tags = merge(local.common_tags, { Name = "${local.prefix}-nat-${count.index + 1}" })
 }
-resource "aws_route_table" "public" { vpc_id = aws_vpc.this.id
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.this.id
   tags = merge(local.common_tags, { Name = "${local.prefix}-public-rt" }) }
-resource "aws_route" "public_internet" { route_table_id = aws_route_table.public.id
+resource "aws_route" "public_internet" {
+  route_table_id = aws_route_table.public.id
   destination_cidr_block = "0.0.0.0/0"
   gateway_id = aws_internet_gateway.this.id }
-resource "aws_route_table_association" "public" { count = var.az_count
+resource "aws_route_table_association" "public" {
+  count = var.az_count
   subnet_id = aws_subnet.public[count.index].id
   route_table_id = aws_route_table.public.id }
-resource "aws_route_table" "private" { count = var.az_count
+resource "aws_route_table" "private" {
+  count = var.az_count
   vpc_id = aws_vpc.this.id
   tags = merge(local.common_tags, { Name = "${local.prefix}-private-rt-${count.index + 1}" }) }
 resource "aws_route" "private_nat" {
@@ -61,7 +67,8 @@ resource "aws_route" "private_nat" {
   destination_cidr_block = "0.0.0.0/0"
   nat_gateway_id = aws_nat_gateway.this[var.single_nat_gateway ? 0 : count.index].id
 }
-resource "aws_route_table_association" "private" { count = var.az_count
+resource "aws_route_table_association" "private" {
+  count = var.az_count
   subnet_id = aws_subnet.private[count.index].id
   route_table_id = aws_route_table.private[count.index].id }
 
@@ -173,23 +180,28 @@ resource "aws_iam_role_policy" "gitlab_iam_limited" {
   })
 }
 
-resource "aws_ecr_repository" "api" { name = "${local.prefix}/api"
+resource "aws_ecr_repository" "api" {
+  name = "${local.prefix}/api"
   image_tag_mutability = "IMMUTABLE"
   image_scanning_configuration { scan_on_push = true }
   encryption_configuration { encryption_type = "AES256" }
   tags = local.common_tags }
-resource "aws_ecr_repository" "worker" { name = "${local.prefix}/worker"
+resource "aws_ecr_repository" "worker" {
+  name = "${local.prefix}/worker"
   image_tag_mutability = "IMMUTABLE"
   image_scanning_configuration { scan_on_push = true }
   encryption_configuration { encryption_type = "AES256" }
   tags = local.common_tags }
-resource "aws_cloudwatch_log_group" "api" { name = "/ecs/${local.prefix}/api"
+resource "aws_cloudwatch_log_group" "api" {
+  name = "/ecs/${local.prefix}/api"
   retention_in_days = var.environment == "prod" ? 90 : 14
   tags = local.common_tags }
-resource "aws_cloudwatch_log_group" "worker" { name = "/ecs/${local.prefix}/worker"
+resource "aws_cloudwatch_log_group" "worker" {
+  name = "/ecs/${local.prefix}/worker"
   retention_in_days = var.environment == "prod" ? 90 : 14
   tags = local.common_tags }
-resource "aws_cloudwatch_log_group" "beat" { name = "/ecs/${local.prefix}/beat"
+resource "aws_cloudwatch_log_group" "beat" {
+  name = "/ecs/${local.prefix}/beat"
   retention_in_days = var.environment == "prod" ? 90 : 14
   tags = local.common_tags }
 resource "aws_sqs_queue" "communications_dlq" {
@@ -214,7 +226,8 @@ resource "aws_sqs_queue" "communications" {
   })
   tags = local.common_tags
 }
-resource "aws_ecs_cluster" "this" { name = local.prefix
+resource "aws_ecs_cluster" "this" {
+  name = local.prefix
   setting { name = "containerInsights"
   value = "enabled" }
   tags = local.common_tags }
@@ -223,7 +236,8 @@ resource "aws_iam_role" "execution" {
   assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "ecs-tasks.amazonaws.com" }, Action = "sts:AssumeRole" }] })
   tags = local.common_tags
 }
-resource "aws_iam_role_policy_attachment" "execution" { role = aws_iam_role.execution.name
+resource "aws_iam_role_policy_attachment" "execution" {
+  role = aws_iam_role.execution.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy" }
 resource "aws_iam_role" "task" {
   name = "${local.prefix}-ecs-task"
@@ -315,10 +329,12 @@ resource "aws_iam_policy" "task_secrets" {
   name = "${local.prefix}-task-secrets"
   policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = ["secretsmanager:GetSecretValue"], Resource = [aws_secretsmanager_secret.app.arn] }, { Effect = "Allow", Action = ["kms:Decrypt"], Resource = ["*"] , Condition = { StringEquals = { "kms:ViaService" = "secretsmanager.${var.aws_region}.amazonaws.com" } } }] })
 }
-resource "aws_iam_role_policy_attachment" "task_secrets" { role = aws_iam_role.execution.name
+resource "aws_iam_role_policy_attachment" "task_secrets" {
+  role = aws_iam_role.execution.name
   policy_arn = aws_iam_policy.task_secrets.arn }
 
-resource "aws_secretsmanager_secret" "app" { name = "${local.prefix}/application"
+resource "aws_secretsmanager_secret" "app" {
+  name = "${local.prefix}/application"
   description = "Populate JSON keys after infrastructure deployment"
   recovery_window_in_days = var.environment == "prod" ? 30 : 7
   tags = local.common_tags }
@@ -344,7 +360,8 @@ resource "aws_secretsmanager_secret_version" "app_initial" {
   })
   lifecycle { ignore_changes = [secret_string] }
 }
-resource "aws_db_subnet_group" "this" { name = local.prefix
+resource "aws_db_subnet_group" "this" {
+  name = local.prefix
   subnet_ids = aws_subnet.private[*].id
   tags = local.common_tags }
 resource "aws_db_instance" "this" {
@@ -371,7 +388,8 @@ resource "aws_db_instance" "this" {
   enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
   tags = local.common_tags
 }
-resource "aws_elasticache_subnet_group" "this" { name = local.prefix
+resource "aws_elasticache_subnet_group" "this" {
+  name = local.prefix
   subnet_ids = aws_subnet.private[*].id }
 resource "aws_elasticache_replication_group" "this" {
   replication_group_id = local.prefix
@@ -392,14 +410,16 @@ resource "aws_elasticache_replication_group" "this" {
   tags = local.common_tags
 }
 
-resource "aws_lb" "this" { name = substr(local.prefix, 0, 32)
+resource "aws_lb" "this" {
+  name = substr(local.prefix, 0, 32)
   load_balancer_type = "application"
   internal = false
   subnets = aws_subnet.public[*].id
   security_groups = [aws_security_group.alb.id, aws_security_group.alb_tls.id]
   enable_deletion_protection = var.environment == "prod"
   tags = local.common_tags }
-resource "aws_lb_target_group" "api" { name = substr("${local.prefix}-api", 0, 32)
+resource "aws_lb_target_group" "api" {
+  name = substr("${local.prefix}-api", 0, 32)
   port = 8000
   protocol = "HTTP"
   vpc_id = aws_vpc.this.id
@@ -609,17 +629,26 @@ resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
   tags = local.common_tags
 }
 
-resource "aws_s3_bucket" "frontend" { bucket = "${local.prefix}-${data.aws_caller_identity.current.account_id}-frontend"
+resource "aws_s3_bucket" "frontend" {
+  bucket = "${local.prefix}-${data.aws_caller_identity.current.account_id}-frontend"
   force_destroy = var.environment != "prod"
   tags = local.common_tags }
-resource "aws_s3_bucket_public_access_block" "frontend" { bucket = aws_s3_bucket.frontend.id
+resource "aws_s3_bucket_public_access_block" "frontend" {
+  bucket = aws_s3_bucket.frontend.id
   block_public_acls = true
   block_public_policy = true
   ignore_public_acls = true
   restrict_public_buckets = true }
-resource "aws_s3_bucket_server_side_encryption_configuration" "frontend" { bucket = aws_s3_bucket.frontend.id
-  rule { apply_server_side_encryption_by_default { sse_algorithm = "AES256" } } }
-resource "aws_cloudfront_origin_access_control" "frontend" { name = "${local.prefix}-oac"
+resource "aws_s3_bucket_server_side_encryption_configuration" "frontend" {
+  bucket = aws_s3_bucket.frontend.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+resource "aws_cloudfront_origin_access_control" "frontend" {
+  name = "${local.prefix}-oac"
   description = "Private S3 origin"
   origin_access_control_origin_type = "s3"
   signing_behavior = "always"
@@ -629,13 +658,21 @@ resource "aws_wafv2_web_acl" "cloudfront" {
   name = "${local.prefix}-cloudfront-waf"
   description = "AWS managed baseline protections for EstateAI CloudFront"
   scope = "CLOUDFRONT"
-  default_action { allow {} }
+  default_action {
+    allow {}
+  }
   rule {
     name = "RateLimitPerIp"
     priority = 1
-    action { block {} }
-    statement { rate_based_statement { limit = 1500
-      aggregate_key_type = "IP" } }
+    action {
+      block {}
+    }
+    statement {
+      rate_based_statement {
+        limit = 1500
+        aggregate_key_type = "IP"
+      }
+    }
     visibility_config { cloudwatch_metrics_enabled = true
       metric_name = "${local.prefix}-rate-limit"
       sampled_requests_enabled = true }
@@ -643,9 +680,15 @@ resource "aws_wafv2_web_acl" "cloudfront" {
   rule {
     name = "AWSManagedCommonRuleSet"
     priority = 10
-    override_action { none {} }
-    statement { managed_rule_group_statement { name = "AWSManagedRulesCommonRuleSet"
-      vendor_name = "AWS" } }
+    override_action {
+      none {}
+    }
+    statement {
+      managed_rule_group_statement {
+        name = "AWSManagedRulesCommonRuleSet"
+        vendor_name = "AWS"
+      }
+    }
     visibility_config { cloudwatch_metrics_enabled = true
       metric_name = "${local.prefix}-common"
       sampled_requests_enabled = true }
@@ -654,8 +697,12 @@ resource "aws_wafv2_web_acl" "cloudfront" {
     name = "AWSManagedKnownBadInputs"
     priority = 20
     override_action { none {} }
-    statement { managed_rule_group_statement { name = "AWSManagedRulesKnownBadInputsRuleSet"
-      vendor_name = "AWS" } }
+    statement {
+      managed_rule_group_statement {
+        name = "AWSManagedRulesKnownBadInputsRuleSet"
+        vendor_name = "AWS"
+      }
+    }
     visibility_config { cloudwatch_metrics_enabled = true
       metric_name = "${local.prefix}-bad-inputs"
       sampled_requests_enabled = true }
@@ -664,8 +711,12 @@ resource "aws_wafv2_web_acl" "cloudfront" {
     name = "AWSManagedIpReputation"
     priority = 30
     override_action { none {} }
-    statement { managed_rule_group_statement { name = "AWSManagedRulesAmazonIpReputationList"
-      vendor_name = "AWS" } }
+    statement {
+      managed_rule_group_statement {
+        name = "AWSManagedRulesAmazonIpReputationList"
+        vendor_name = "AWS"
+      }
+    }
     visibility_config { cloudwatch_metrics_enabled = true
       metric_name = "${local.prefix}-ip-reputation"
       sampled_requests_enabled = true }
@@ -740,7 +791,11 @@ resource "aws_cloudfront_distribution" "frontend" {
     }
   }
 
-  restrictions { geo_restriction { restriction_type = "none" } }
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
   viewer_certificate { cloudfront_default_certificate = true }
   tags = local.common_tags
 }
