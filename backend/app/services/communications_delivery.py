@@ -16,7 +16,7 @@ class DeliveryError(Exception):
 
 
 def _normalise_whatsapp_number(value: str) -> str:
-    digits = re.sub(r"\\D", "", value or "")
+    digits = re.sub(r"\D", "", value or "")
     if digits.startswith("00"):
         digits = digits[2:]
     if not digits or len(digits) < 8:
